@@ -1,20 +1,50 @@
 # つみノート Design Specification
 
-## 1. Source of Truth
+## 1. Purpose
 
-### Figma
+このドキュメントは「つみノート」のVisual DesignおよびUI実装ルールを定義する。
 
-https://www.figma.com/design/2YR8QWeewgVF9tIM9yfLu7/%E5%AD%A6%E7%BF%92%E3%82%A2%E3%83%97%E3%83%AA%EF%BD%9CBlue---Charcoal?node-id=190-32
-
-### Claude Artifact
-
-https://claude.ai/artifact/6zU6y5LDsyWVe9ctj3YBF2
+機能要件については `PRODUCT_SPEC.md`、技術設計については `ARCHITECTURE.md` をSource of Truthとする。
 
 ---
 
-# 2. Priority
+# 2. Design Source of Truth
 
-仕様・デザインが競合した場合：
+## Figma
+
+Visual DesignのSource of Truthとして以下のFigmaを使用する。
+
+```text
+https://www.figma.com/design/2YR8QWeewgVF9tIM9yfLu7/%E5%AD%A6%E7%BF%92%E3%82%A2%E3%83%97%E3%83%AA%EF%BD%9CBlue---Charcoal?node-id=190-32
+```
+
+Figma File Key:
+
+```text
+2YR8QWeewgVF9tIM9yfLu7
+```
+
+Initial Node:
+
+```text
+190:32
+```
+
+## Claude Artifact
+
+画面全体の意図や補助的なデザイン資料として以下を使用する。
+
+```text
+https://claude.ai/artifact/6zU6y5LDsyWVe9ctj3YBF2
+```
+
+Claude Artifactは補助資料であり、Figmaより優先しない。
+
+---
+
+# 3. Priority
+
+仕様やデザインが競合する場合、以下の順で優先する。
 
 ```text
 1. PRODUCT_SPEC.md
@@ -22,47 +52,155 @@ https://claude.ai/artifact/6zU6y5LDsyWVe9ctj3YBF2
 3. Claude Artifact
 ```
 
-を優先する。
+役割は以下とする。
 
-`PRODUCT_SPEC.md` は機能仕様のSource of Truth。
+- `PRODUCT_SPEC.md`
+  - 機能仕様のSource of Truth
+- Figma
+  - Visual DesignのSource of Truth
+- `ARCHITECTURE.md`
+  - 技術設計・実装方針のSource of Truth
+- Claude Artifact
+  - UI意図や画面構成を理解するための補助資料
 
-FigmaはVisual DesignのSource of Truth。
-
-Claude Artifactは画面全体やUI意図を理解する補助資料として扱う。
+機能要件とFigmaが競合した場合は `PRODUCT_SPEC.md` を優先する。
 
 ---
 
-# 3. Figma MCP
+# 4. Figma Access
 
-Figma MCPが利用可能な開発環境では、UI実装前に対象Nodeを確認する。
+## GitHub Actions / Claude Code Action
 
-可能な限り以下をFigmaから取得する。
+GitHub Actions上のClaude Codeでは、Figma REST APIを使用してデザインを読み取る。
 
-- Colors
-- Typography
-- Font Weight
-- Font Size
-- Line Height
-- Spacing
-- Padding
-- Gap
-- Border Radius
-- Border
-- Shadow
-- Icons
-- Component Size
+環境変数として以下が設定されている。
+
+```text
+FIGMA_ACCESS_TOKEN
+FIGMA_FILE_KEY
+```
+
+`FIGMA_ACCESS_TOKEN` はGitHub Actions Secretから渡される。
+
+Tokenを以下へ出力してはならない。
+
+- Source Code
+- Log
+- Issue
+- Pull Request
+- README
+- Documentation
+- Commit
+
+Figma APIは読み取り用途に限定する。
+
+Figmaへの変更・書き込みを行わない。
+
+---
+
+# 5. Figma REST API
+
+UIを実装する場合、必要に応じてFigma REST APIから対象Nodeを取得する。
+
+例：
+
+```bash
+curl \
+  --fail \
+  --silent \
+  --show-error \
+  -H "X-Figma-Token: $FIGMA_ACCESS_TOKEN" \
+  "https://api.figma.com/v1/files/$FIGMA_FILE_KEY/nodes?ids=190:32"
+```
+
+Node IDは実装対象画面に応じて変更する。
+
+Figma APIから最低限以下を確認する。
+
+- Node hierarchy
+- Frame size
 - Layout
-- States
+- Auto Layout
+- Width / Height
+- Padding
+- Gap / itemSpacing
+- Colors
+- Background
+- Typography
+- Font size
+- Font weight
+- Line height
+- Border
+- Border radius
+- Effects / Shadow
+- Component hierarchy
+- Component instances
+- Icons
+- Alignment
 
-見た目を推測だけで実装しない。
+APIから取得できない情報については推測で断定しない。
+
+必要に応じてPRの「Figmaとの差異」に記載する。
 
 ---
 
-# 4. Design System
+# 6. Figma MCP
 
-React Native側でDesign Tokensを定義する。
+ローカルClaude Code等でFigma MCPが利用可能な場合は、Figma MCPを使用してよい。
 
-対象：
+優先順位：
+
+```text
+Figma MCPが利用可能
+    ↓
+Figma MCPを使用
+
+Figma MCPが利用不可
+    ↓
+Figma REST APIを使用
+```
+
+GitHub ActionsではFigma REST APIによる読み取りを標準手段とする。
+
+Figma MCPの有無によってVisual DesignのSource of Truth自体は変わらない。
+
+---
+
+# 7. UI Implementation Flow
+
+UIを実装するときは以下の順番で進める。
+
+```text
+PRODUCT_SPEC.md
+        ↓
+対象機能・状態を確認
+        ↓
+DESIGN.md
+        ↓
+Figma Nodeを特定
+        ↓
+Figma REST API / Figma MCP
+        ↓
+Design情報を取得
+        ↓
+既存Design Tokens / Componentsを確認
+        ↓
+React Nativeで実装
+        ↓
+Figmaとの差異を確認
+        ↓
+必要に応じて修正
+```
+
+Figmaを確認せず、見た目を推測だけで実装しない。
+
+---
+
+# 8. Design System
+
+React Native側にDesign Tokensを定義する。
+
+最低限以下をToken化する。
 
 ```text
 Colors
@@ -73,41 +211,56 @@ Shadow
 Icon Size
 ```
 
-Component内で、
+可能な限りFigmaから取得した値を基準とする。
+
+Component内で任意の値を大量に直接記述しない。
+
+例：
 
 ```text
 #xxxxxx
+padding: 17
+borderRadius: 13
 ```
 
-のような色コードや任意のspacing値を大量に直接記述しない。
+のような値を画面ごとに無秩序に追加しない。
 
-NativeWind等から再利用できる構造とする。
-
-Web用Tailwind設定をそのままコピーするのではなく、React Native向けに適切に構築する。
+共通値はDesign Tokensへ集約する。
 
 ---
 
-# 5. Visual Direction
+# 9. NativeWind
+
+StylingにはNativeWindを使用する。
+
+ただしWeb用Tailwind設定をそのまま流用せず、React Native向けに構築する。
+
+Design TokensとNativeWindの設定を可能な限り連携させる。
+
+---
+
+# 10. Visual Direction
 
 Figmaの「Blue - Charcoal」を基本とする。
 
-アプリ全体で、
+アプリ全体で以下を維持する。
 
-- Blue
-- Charcoal
-- Neutral background
-- Clear hierarchy
-- High readability
+- BlueをPrimary Accentとして使用
+- Charcoal系Text
+- Neutral Background
+- 明確なVisual Hierarchy
+- 高い可読性
+- 適切な余白
+- 一貫したRadius
+- 一貫したComponent Design
 
-を維持する。
-
-独自の別Design Systemを画面ごとに追加しない。
+画面ごとに独自のDesign Systemを作らない。
 
 ---
 
-# 6. Bottom Navigation
+# 11. Bottom Navigation
 
-5タブ：
+Bottom Navigationは5タブ。
 
 ```text
 記録
@@ -117,21 +270,36 @@ Figmaの「Blue - Charcoal」を基本とする。
 マイページ
 ```
 
-中央：
+中央の、
 
 ```text
 タイマー
 ```
 
-を視覚的に強調する。
+を他タブより視覚的に強調する。
 
-Figmaのサイズ・位置・余白・アイコンを確認して再現する。
+実装前にFigmaから以下を確認する。
+
+- Navigation height
+- Icon size
+- Icon position
+- Label typography
+- Active state
+- Inactive state
+- Background
+- Center timer button size
+- Center timer button position
+- Shadow
+- Radius
+- Safe Area
+
+独自のBottom Navigationデザインへ変更しない。
 
 ---
 
-# 7. Designed Screens
+# 12. Designed Screens
 
-以下はデザイン済み。
+以下はFigma等でデザイン済み。
 
 ```text
 00  起動画面
@@ -155,144 +323,344 @@ Figmaのサイズ・位置・余白・アイコンを確認して再現する。
 18  アカウント削除
 ```
 
-これらについては独自に再設計せずFigmaを優先する。
+これらについては独自に再設計せず、FigmaをVisual DesignのSource of Truthとして実装する。
 
 ---
 
-# 8. Undesigned Screens / States
+# 13. Undesigned Screens / States
 
-以下は未デザイン。
+以下は現時点で未デザイン。
 
-- Timer Focus State
-- Timer Break State
-- Timer Paused State
-- Timer Round Complete
+## Timer
+
+- Focus State
+- Break State
+- Paused State
+- Round Complete
 - Timer Settings
+
+## Notes
+
 - Note Action Menu
+
+## Folder
+
 - Folder Edit
 - Folder Delete Confirmation
+
+## Questions
+
 - Question Detail
 - Question Edit
 - Question Delete Confirmation
+
+## Review
+
 - Review Timeout
 - Review Complete
+
+## Goal
+
 - Goal Create
 - Goal Edit
+
+## Account
+
 - Login
+
+## Settings
+
 - Notification Settings
 - Privacy / Data
 
-これらも必要な画面・状態であり、未デザインだから不要という意味ではない。
+未デザインは「不要」という意味ではない。
 
-実装時は既存FigmaのDesign System・Component・Spacing・Typography等を再利用する。
+`PRODUCT_SPEC.md` に記載されている機能は実装対象である。
 
----
-
-# 9. Notes
-
-ノートUIはMarkdown専用。
-
-手書きUIを実装しない。
-
-Apple Pencil / PencilKit向けUIも作成しない。
-
----
-
-# 10. Dark Mode
-
-Dark Modeに対応する。
-
-Design TokenをLight / Darkで切り替えられる構造にする。
-
-FigmaにDark Modeの完全な指定が存在しない箇所については、既存のBlue / Charcoal Design Systemとの一貫性を維持する。
-
----
-
-# 11. Responsive Layout
-
-対象：
-
-- iPhone
-- iPad
-
-固定pixel位置だけに依存しない。
-
-iPhoneとiPadで破綻しないlayoutを使用する。
-
-ただしFigmaとの差異を避けるため、過剰に独自responsive layoutへ変更しない。
-
----
-
-# 12. Accessibility
-
-最低限考慮する。
-
-- Touch Target
-- Text Contrast
-- Dynamic content
-- Screen Reader label
-- Disabled State
-- Loading State
-- Error State
-
-Visual Designを大きく変更せずaccessibilityを確保する。
-
----
-
-# 13. Implementation Rule
-
-UIを実装するとき：
-
-```text
-PRODUCT_SPEC.mdを確認
-↓
-Figma対象画面を確認
-↓
-既存Design Token / Componentを確認
-↓
-実装
-↓
-Figmaと比較
-↓
-差異修正
-```
-
-の順で行う。
-
-Figmaとの差異が残る場合はPRに理由を記載する。
+未デザイン画面については、既存FigmaのDesign Systemを使用してデザインする。
 
 ---
 
 # 14. New UI Rule
 
-未デザイン画面を実装する場合：
+未デザイン画面を実装する場合は以下の順番で判断する。
 
-1. 既存Figma Componentを探す
-2. 類似画面のlayoutを再利用する
-3. Design Tokenを利用する
-4. 新しいDesign Patternの追加を最小限にする
+1. Figma内に類似Componentがないか確認
+2. Figma内に類似画面がないか確認
+3. 既存Design Tokensを使用
+4. 既存Componentを再利用
+5. 既存Spacing / Typographyを使用
+6. 新しいDesign Patternの追加を最小限にする
 
-Claude独自のDesign Systemを勝手に作らない。
+Claude独自のDesign Systemを新しく作らない。
 
 ---
 
-# 15. Design Review
+# 15. Notes Design
 
-主要UIのPRでは可能な限り、
+ノートはMarkdown専用。
 
-- Figma
-- Simulator / Device implementation
+対応：
 
-を比較する。
+- Heading
+- List
+- Checklist
+- Link
+- Code
 
-特に確認：
+手書き機能は実装しない。
 
-- Layout
-- Spacing
-- Typography
-- Colors
-- Radius
-- Icons
-- Navigation
+以下も実装しない。
+
+- Apple Pencil UI
+- PencilKit
+- Drawing Canvas
+- Handwriting Toolbar
+
+---
+
+# 16. Light / Dark Mode
+
+Dark Modeに対応できるDesign Token構造とする。
+
+例：
+
+```text
+Light Theme
+├── background
+├── surface
+├── textPrimary
+├── textSecondary
+├── border
+└── primary
+
+Dark Theme
+├── background
+├── surface
+├── textPrimary
+├── textSecondary
+├── border
+└── primary
+```
+
+FigmaにDark Modeの完全な指定が存在しない場合、既存Blue / Charcoal Design Systemとの一貫性を維持する。
+
+推測で大量の独自色を追加しない。
+
+---
+
+# 17. iPhone / iPad
+
+v1対象：
+
 - iPhone
 - iPad
+
+固定座標だけに依存した実装を避ける。
+
+以下を考慮する。
+
+- Safe Area
+- Screen width
+- Screen height
+- Orientation requirements
+- iPad width
+- Content max width
+- Modal / Sheet size
+
+ただしFigmaとの差異が大きくなる独自Responsive Designは避ける。
+
+---
+
+# 18. Accessibility
+
+最低限以下を考慮する。
+
+- Touch Target
+- Text Contrast
+- Accessibility Label
+- Screen Reader
+- Disabled State
+- Loading State
+- Error State
+- Selected State
+- Focus State
+
+Accessibility対応を理由にFigmaのVisual Designを不必要に変更しない。
+
+---
+
+# 19. Component Policy
+
+共通UIは再利用可能なComponentとして実装する。
+
+例：
+
+```text
+Button
+IconButton
+Card
+Input
+SearchInput
+Sheet
+Modal
+Badge
+EmptyState
+SectionHeader
+TabBar
+TimerRing
+```
+
+ただし、まだ1箇所でしか使わないUIまで過剰にComponent化しない。
+
+実際に共通化する価値があるものを抽出する。
+
+---
+
+# 20. Icon Policy
+
+Figmaで指定されているIconを優先する。
+
+同一Icon Setを可能な限り使用し、画面ごとに異なるIcon Libraryを混在させない。
+
+FigmaでIconが特定できない場合は、既存UIとのVisual Consistencyを優先する。
+
+---
+
+# 21. Loading / Empty / Error States
+
+主要画面では必要に応じて以下を考慮する。
+
+```text
+Loading
+Empty
+Error
+Disabled
+Offline
+Syncing
+```
+
+Local Firstアプリのため、ネットワーク切断だけを理由に主要機能を利用不能にしない。
+
+---
+
+# 22. Sync UI
+
+アカウント登録後のマイページでは同期状態を表示する。
+
+例：
+
+```text
+最終同期 3分前
+```
+
+必要に応じて以下の状態を表現する。
+
+```text
+Synced
+Syncing
+Offline
+Sync Error
+```
+
+同期処理によって通常操作をblockしない。
+
+---
+
+# 23. Figma Difference Reporting
+
+Figmaを完全に再現できない場合、Claudeは勝手に無視せずPRで報告する。
+
+Phase完了報告には、
+
+```text
+## Figmaとの差異
+```
+
+を含める。
+
+記載例：
+
+```text
+- Figmaでは○○だがReact Nativeの制約により△△で実装
+- Dark ModeはFigma未定義のため既存Tokenから派生
+- 対象StateがFigma未デザインのため既存Componentから作成
+```
+
+差異がない場合：
+
+```text
+特になし
+```
+
+とする。
+
+---
+
+# 24. Security
+
+Figma Access Tokenを以下に含めてはならない。
+
+```text
+Source Code
+Commit
+Git History
+Issue
+Pull Request
+Log
+README
+Documentation
+Screenshot
+```
+
+TokenそのものをClaudeの回答へ出力しない。
+
+Figma APIへのアクセスは読み取り目的に限定する。
+
+---
+
+# 25. Definition of Done for UI
+
+UI実装を完了とする前に以下を確認する。
+
+- [ ] `PRODUCT_SPEC.md` を確認した
+- [ ] `DESIGN.md` を確認した
+- [ ] 対象Figma Nodeを確認した
+- [ ] Figma REST APIまたはFigma MCPからデザイン情報を取得した
+- [ ] Design Tokensを使用している
+- [ ] 既存Componentを可能な範囲で再利用している
+- [ ] iPhoneでレイアウトが破綻しない
+- [ ] iPadでレイアウトが破綻しない
+- [ ] Light / Dark Modeを考慮している
+- [ ] Loading / Error等の必要状態を考慮した
+- [ ] Accessibilityを考慮した
+- [ ] Figmaとの差異を確認した
+- [ ] 差異がある場合はPRに記載した
+
+---
+
+# 26. Final Rule
+
+つみノートのUI実装では、
+
+```text
+機能
+    → PRODUCT_SPEC.md
+
+技術
+    → ARCHITECTURE.md
+
+Visual Design
+    → Figma
+
+補助資料
+    → Claude Artifact
+```
+
+を基本原則とする。
+
+GitHub Actions上のClaude Codeは、Figma MCPが利用できない場合でもFigma REST APIを利用してVisual Designを確認してからUIを実装する。
+
+Figmaを確認できない場合は、デザイン済み画面を推測だけで完成扱いにしない。
+
+その場合は制約としてIssue / PRへ報告する。
