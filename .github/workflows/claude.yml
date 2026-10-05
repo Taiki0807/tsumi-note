@@ -17,6 +17,7 @@ jobs:
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+
     runs-on: ubuntu-latest
 
     permissions:
@@ -35,11 +36,20 @@ jobs:
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
+
+        env:
+          # Figma REST API - read-only access
+          FIGMA_ACCESS_TOKEN: ${{ secrets.FIGMA_ACCESS_TOKEN }}
+
+          # tsumi-note Figma file
+          FIGMA_FILE_KEY: 2YR8QWeewgVF9tIM9yfLu7
+
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
+          # Allows Claude to inspect GitHub Actions / CI results
           additional_permissions: |
             actions: read
 
           claude_args: |
-            --allowedTools "Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*)"
+            --allowedTools "Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*),Bash(curl:*)"
