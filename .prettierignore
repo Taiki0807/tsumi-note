@@ -1,0 +1,9 @@
+node_modules
+.expo
+dist
+.scratch
+drizzle
+bun.lock
+assets
+docs
+.github
