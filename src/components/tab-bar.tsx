@@ -1,7 +1,7 @@
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import { Pressable, Text, View } from 'react-native';
 
-import { fontFamily, iconSize, layout, radius, shadow, typography, useTheme } from '@/design';
+import { fontFamily, iconSize, layout, shadow, typography, useTheme } from '@/design';
 
 import { Icon, type IconName } from './icons';
 
@@ -24,16 +24,18 @@ export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarP
       accessibilityRole="tablist"
       style={{
         backgroundColor: colors.surface,
-        borderTopColor: colors.divider,
-        borderTopWidth: 1,
-        paddingBottom: insets.bottom,
+        minHeight: layout.tabBarHeight,
+        paddingBottom: Math.max(insets.bottom, layout.tabBarHeight - layout.tabContentHeight),
       }}
     >
       <View
+        pointerEvents="none"
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 1, backgroundColor: colors.divider }}
+      />
+      <View
         style={{
-          height: layout.tabBarHeight,
+          height: layout.tabContentHeight,
           flexDirection: 'row',
-          alignItems: 'flex-start',
           alignSelf: 'center',
           width: '100%',
           maxWidth: layout.contentMaxWidth,
@@ -64,36 +66,55 @@ export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarP
               accessibilityLabel={label}
               accessibilityState={{ selected: focused }}
               onPress={onPress}
-              style={{ flex: 1, alignItems: 'center', paddingTop: isCenter ? 0 : 6 }}
+              style={{ flex: 1, alignItems: 'center' }}
             >
               {isCenter ? (
-                <View style={{ marginTop: -(layout.timerButtonSize / 2 - 10), alignItems: 'center', gap: 2 }}>
+                <View
+                  style={{ marginTop: -layout.timerButtonProtrusion, alignItems: 'center', gap: layout.tabItemGap }}
+                >
                   <View
-                    style={[
-                      {
-                        width: layout.timerButtonSize,
-                        height: layout.timerButtonSize,
-                        borderRadius: radius['2xl'],
-                        borderWidth: layout.timerButtonBorder,
-                        borderColor: colors.surface,
-                        backgroundColor: colors.primary,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      },
-                      shadow.primary,
-                    ]}
+                    style={{
+                      width: layout.timerButtonSize,
+                      height: layout.timerButtonSize,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
                   >
-                    <Icon name="clock" size={iconSize.xl} color={colors.textOnPrimary} strokeWidth={2.5} />
+                    {/* Figma strokes the button OUTSIDE (4pt): the ring extends beyond the 56pt box. */}
+                    <View
+                      style={[
+                        {
+                          position: 'absolute',
+                          top: -layout.timerButtonBorder,
+                          left: -layout.timerButtonBorder,
+                          width: layout.timerButtonSize + layout.timerButtonBorder * 2,
+                          height: layout.timerButtonSize + layout.timerButtonBorder * 2,
+                          borderRadius: (layout.timerButtonSize + layout.timerButtonBorder * 2) / 2,
+                          borderWidth: layout.timerButtonBorder,
+                          borderColor: colors.surface,
+                          backgroundColor: colors.primary,
+                        },
+                        shadow.primary,
+                      ]}
+                    />
+                    <Icon name="clock" size={iconSize.xl} color={colors.textOnPrimary} strokeWidth={2.2} />
                   </View>
                   <Text style={labelStyle}>{label}</Text>
                 </View>
               ) : (
-                <View style={{ alignItems: 'center', gap: 2 }}>
+                <View
+                  style={{
+                    marginTop: layout.tabItemOffset,
+                    paddingTop: layout.tabItemPaddingTop,
+                    alignItems: 'center',
+                    gap: layout.tabItemGap,
+                  }}
+                >
                   <Icon
                     name={TAB_ICONS[route.name] ?? 'note'}
                     size={iconSize.lg}
                     color={labelColor}
-                    strokeWidth={focused ? 2.4 : 2}
+                    strokeWidth={route.name === 'records' ? 2.4 : 2}
                   />
                   <Text style={labelStyle}>{label}</Text>
                 </View>

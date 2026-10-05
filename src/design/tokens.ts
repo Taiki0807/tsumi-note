@@ -184,9 +184,18 @@ export const iconSize = {
 
 /** Layout constants taken from the Figma TabBar component. */
 export const layout = {
+  /** Figma TabBar › Background (390x76). Includes the area below the tab items. */
   tabBarHeight: 76,
+  /** Tab items area: 2 (offset below divider) + 48 (Tab frame height). */
+  tabContentHeight: 50,
+  tabItemOffset: 2,
+  tabItemPaddingTop: 6,
+  tabItemGap: 2,
   timerButtonSize: 56,
+  /** Stroke is drawn OUTSIDE the 56pt fill in Figma (visual diameter 64). */
   timerButtonBorder: 4,
+  /** Distance the 56pt button rises above the top edge of the bar. */
+  timerButtonProtrusion: 24,
   /** Content max width on iPad (Figma frames are 390pt wide). */
   contentMaxWidth: 640,
 } as const;
