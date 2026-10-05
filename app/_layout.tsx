@@ -11,7 +11,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Text } from 'react-native';
+import { Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { SplashView } from '@/components/splash-view';
@@ -20,6 +20,9 @@ import { useTheme } from '@/design';
 
 // Keep the native splash until fonts are loaded, then hand over to <SplashView/> while the DB migrates.
 void SplashScreen.preventAutoHideAsync();
+
+/** Figma 00 起動画面 background; shown behind everything until the app body is mounted. */
+const SPLASH_BACKGROUND = '#6949ff';
 
 export default function RootLayout() {
   const colors = useTheme();
@@ -38,18 +41,22 @@ export default function RootLayout() {
   if (!ready) return null;
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="auto" />
-      <DatabaseProvider
-        fallback={<SplashView />}
-        renderError={(error) => (
-          <Text style={{ color: colors.danger, padding: 24 }} accessibilityRole="alert">
-            データベースの初期化に失敗しました: {error.message}
-          </Text>
-        )}
-      >
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
-      </DatabaseProvider>
-    </SafeAreaProvider>
+    <View style={{ flex: 1, backgroundColor: SPLASH_BACKGROUND }}>
+      <SafeAreaProvider>
+        <StatusBar style="auto" />
+        <DatabaseProvider
+          fallback={<SplashView />}
+          renderError={(error) => (
+            <Text style={{ color: colors.danger, padding: 24 }} accessibilityRole="alert">
+              データベースの初期化に失敗しました: {error.message}
+            </Text>
+          )}
+        >
+          <Stack
+            screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}
+          />
+        </DatabaseProvider>
+      </SafeAreaProvider>
+    </View>
   );
 }
