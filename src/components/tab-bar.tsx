@@ -30,7 +30,14 @@ export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarP
     >
       <View
         pointerEvents="none"
-        style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 1, backgroundColor: colors.divider }}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 1,
+          backgroundColor: colors.divider,
+        }}
       />
       <View
         style={{
@@ -70,7 +77,11 @@ export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarP
             >
               {isCenter ? (
                 <View
-                  style={{ marginTop: -layout.timerButtonProtrusion, alignItems: 'center', gap: layout.tabItemGap }}
+                  style={{
+                    marginTop: -layout.timerButtonProtrusion,
+                    alignItems: 'center',
+                    gap: layout.tabItemGap,
+                  }}
                 >
                   <View
                     style={{
