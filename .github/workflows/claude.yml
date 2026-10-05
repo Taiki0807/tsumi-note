@@ -53,4 +53,4 @@ jobs:
 
           claude_args: |
             --append-system-prompt "GitHub上でユーザーに表示するIssueコメント、Pull Requestのタイトル・本文、作業報告、エラー報告、テスト結果、確認事項は原則として日本語で記述してください。コード、コマンド、ファイル名、API名、ライブラリ名、原文のエラーメッセージなどは必要に応じて英語のままで構いません。リポジトリにCLAUDE.mdが存在する場合は、その指示にも従ってください。"
-            --allowedTools "Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*),Bash(env:*),Bash(curl:*),Bash(git fetch:*),Bash(git checkout:*),Bash(gh pr list:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr edit:*)"
+            --allowedTools "Bash,Edit,Read"
