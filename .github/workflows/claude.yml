@@ -34,26 +34,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create Figma MCP config
-        run: |
-          cat > /tmp/figma-mcp.json << 'EOF'
-          {
-            "mcpServers": {
-              "figma-developer-mcp": {
-                "command": "npx",
-                "args": [
-                  "-y",
-                  "figma-developer-mcp",
-                  "--stdio"
-                ],
-                "env": {
-                  "FIGMA_API_KEY": "${{ secrets.FIGMA_ACCESS_TOKEN }}"
-                }
-              }
-            }
-          }
-          EOF
-
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -63,7 +43,14 @@ jobs:
           additional_permissions: |
             actions: read
 
+          settings: |
+            {
+              "env": {
+                "FIGMA_ACCESS_TOKEN": "${{ secrets.FIGMA_ACCESS_TOKEN }}",
+                "FIGMA_FILE_KEY": "2YR8QWeewgVF9tIM9yfLu7"
+              }
+            }
+
           claude_args: |
-            --mcp-config /tmp/figma-mcp.json
-            --append-system-prompt "GitHub上でユーザーに表示するIssueコメント、Pull Requestのタイトル・本文、作業報告、エラー報告、テスト結果、確認事項は原則として日本語で記述してください。Figmaデザインを確認する場合はFigma MCPを使用し、FigmaをVisual DesignのSource of Truthとして扱ってください。リポジトリにCLAUDE.mdが存在する場合は、その指示にも従ってください。"
-            --allowedTools "mcp__figma-developer-mcp__get_figma_data,mcp__figma-developer-mcp__download_figma_images,Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*),Bash(git fetch:*),Bash(git checkout:*),Bash(gh pr list:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr edit:*)"
+            --append-system-prompt "GitHub上でユーザーに表示するIssueコメント、Pull Requestのタイトル・本文、作業報告、エラー報告、テスト結果、Figmaとの差異、懸念事項、確認事項は原則として日本語で記述してください。コード、コマンド、ファイル名、API名、ライブラリ名、原文のエラーメッセージなどは必要に応じて英語のままで構いません。FigmaはVisual DesignのSource of Truthとして扱ってください。Figmaのデザインが存在する画面について、色、サイズ、余白、位置、角丸、Typography等を推測で変更せず、Figma REST APIから取得可能な値を優先してください。Figma REST APIを使用する場合はFIGMA_ACCESS_TOKENとFIGMA_FILE_KEYの環境変数を使用し、FIGMA_ACCESS_TOKENの値そのものをログ、コメント、コード、PR本文等へ絶対に出力しないでください。リポジトリにCLAUDE.mdが存在する場合は、その指示にも従ってください。"
+            --allowedTools "Bash,Edit,Read"
