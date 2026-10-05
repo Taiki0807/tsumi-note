@@ -52,4 +52,4 @@ jobs:
             }
 
           claude_args: |
-            --allowedTools "Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*),Bash(env:*),Bash(curl:*)"
+            --allowedTools "Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*),Bash(env:*),Bash(curl:*),Bash(git fetch:*),Bash(gh pr list:*),Bash(gh pr create:*)"
