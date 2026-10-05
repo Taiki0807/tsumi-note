@@ -34,6 +34,29 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Claude起動前にラッパースクリプトが存在することを確認
+      - name: Verify Figma wrapper
+        run: |
+          echo "=== Working directory ==="
+          pwd
+
+          echo "=== Git branch ==="
+          git branch --show-current || true
+
+          echo "=== Git commit ==="
+          git rev-parse HEAD
+
+          echo "=== Repository root ==="
+          ls -la
+
+          echo "=== Figma wrapper ==="
+          ls -l ./figma-fetch
+
+          test -f ./figma-fetch
+          test -x ./figma-fetch
+
+          echo "Figma wrapper is ready."
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -46,11 +69,10 @@ jobs:
           settings: |
             {
               "env": {
-                "FIGMA_ACCESS_TOKEN": "${{ secrets.FIGMA_ACCESS_TOKEN }}",
-                "FIGMA_FILE_KEY": "2YR8QWeewgVF9tIM9yfLu7"
+                "FIGMA_ACCESS_TOKEN": "${{ secrets.FIGMA_ACCESS_TOKEN }}"
               }
             }
 
           claude_args: |
-            --append-system-prompt "GitHub上でユーザーに表示するIssueコメント、Pull Requestのタイトル・本文、作業報告、エラー報告、テスト結果、確認事項は原則として日本語で記述してください。コード、コマンド、ファイル名、API名、ライブラリ名、原文のエラーメッセージなどは必要に応じて英語のままで構いません。リポジトリにCLAUDE.mdが存在する場合は、その指示にも従ってください。"
-            --allowedTools "Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*),Bash(env:*),Bash(curl:*),Bash(git fetch:*),Bash(git checkout:*),Bash(gh pr list:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr edit:*)"
+            --append-system-prompt "GitHub上でユーザーに表示するIssueコメント、Pull Requestのタイトル・本文、作業報告、エラー報告、テスト結果、Figmaとの差異、懸念事項、確認事項は原則として日本語で記述してください。コード、コマンド、ファイル名、API名、ライブラリ名、原文のエラーメッセージなどは必要に応じて英語のままで構いません。FigmaはVisual DesignのSource of Truthとして扱ってください。Figmaデザインを取得する場合はcurlを直接実行せず、必ずリポジトリルートの ./figma-fetch を使用してください。FIGMA_ACCESS_TOKENの値そのものをログ、Issueコメント、PR本文、コード等へ絶対に出力しないでください。リポジトリにCLAUDE.mdが存在する場合は、その指示にも従ってください。"
+            --allowedTools "Read,Edit,Bash(./figma-fetch:*),Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*),Bash(git fetch:*),Bash(git checkout:*),Bash(gh pr list:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr edit:*)"

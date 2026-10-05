@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly FIGMA_FILE_KEY="2YR8QWeewgVF9tIM9yfLu7"
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: ./figma-fetch <node-id>" >&2
+  exit 1
+fi
+
+NODE_ID="$1"
+
+# Figma Node ID以外を受け付けない
+if [[ ! "$NODE_ID" =~ ^[0-9]+:[0-9]+$ ]]; then
+  echo "Invalid Figma node ID: $NODE_ID" >&2
+  exit 1
+fi
+
+if [[ -z "${FIGMA_ACCESS_TOKEN:-}" ]]; then
+  echo "FIGMA_ACCESS_TOKEN is not set." >&2
+  exit 1
+fi
+
+curl \
+  --fail \
+  --silent \
+  --show-error \
+  --get \
+  --header "X-Figma-Token: ${FIGMA_ACCESS_TOKEN}" \
+  --data-urlencode "ids=${NODE_ID}" \
+  "https://api.figma.com/v1/files/${FIGMA_FILE_KEY}/nodes"
