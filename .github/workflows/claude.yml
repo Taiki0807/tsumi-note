@@ -36,20 +36,20 @@ jobs:
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
-
-        env:
-          # Figma REST API - read-only access
-          FIGMA_ACCESS_TOKEN: ${{ secrets.FIGMA_ACCESS_TOKEN }}
-
-          # tsumi-note Figma file
-          FIGMA_FILE_KEY: 2YR8QWeewgVF9tIM9yfLu7
-
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-          # Allows Claude to inspect GitHub Actions / CI results
           additional_permissions: |
             actions: read
 
+          # Claude Codeセッション内で利用する環境変数
+          settings: |
+            {
+              "env": {
+                "FIGMA_ACCESS_TOKEN": "${{ secrets.FIGMA_ACCESS_TOKEN }}",
+                "FIGMA_FILE_KEY": "2YR8QWeewgVF9tIM9yfLu7"
+              }
+            }
+
           claude_args: |
-            --allowedTools "Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*),Bash(curl:*)"
+            --allowedTools "Bash(bun:*),Bash(bunx:*),Bash(npx:*),Bash(node:*),Bash(npm view:*),Bash(env:*),Bash(curl:*)"
