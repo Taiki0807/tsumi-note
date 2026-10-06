@@ -9,7 +9,7 @@ type FontSizeEntry = [string, { lineHeight: string }];
 // Colors here are the light theme. Theme-aware colors are resolved at runtime via `useTheme()`.
 const fontSize = Object.fromEntries(
   Object.entries(typography).map(([key, { fontSize: size, lineHeight }]): [string, FontSizeEntry] => [
-    key,
+    key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`),
     [`${size}px`, { lineHeight: `${lineHeight}px` }],
   ]),
 );
