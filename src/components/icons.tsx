@@ -25,7 +25,9 @@ export type IconName =
   | 'heading'
   | 'checklist'
   | 'link'
-  | 'code';
+  | 'code'
+  | 'image'
+  | 'eye';
 
 type Props = {
   name: IconName;
@@ -147,6 +149,19 @@ export function Icon({ name, size, color, strokeWidth = 2, handsColor }: Props) 
         </>
       )}
       {name === 'code' && <Path d="M8 7l-5 5 5 5M16 7l5 5-5 5" {...common} />}
+      {name === 'image' && (
+        <>
+          <Rect x={3.5} y={4.5} width={17} height={15} rx={2.5} {...common} />
+          <Circle cx={9} cy={10} r={1.5} {...common} />
+          <Path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5" {...common} />
+        </>
+      )}
+      {name === 'eye' && (
+        <>
+          <Path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" {...common} />
+          <Circle cx={12} cy={12} r={3} {...common} />
+        </>
+      )}
       {name === 'user' && (
         <>
           <Circle cx={12} cy={8} r={4} {...common} />

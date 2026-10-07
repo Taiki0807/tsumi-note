@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,25 +14,90 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, EmptyState, IconButton } from '@/components/form-ui';
-import { Icon, type IconName } from '@/components/icons';
+import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, typography, useTheme } from '@/design';
-import { insertSnippet, toggleChecklistLine, toggleLinePrefix, type TextEdit } from '@/domain/markdown';
+import { toggleChecklistLine } from '@/domain/markdown';
+import {
+  applyBlock,
+  currentHeadingLevel,
+  insertCodeBlock,
+  insertImage,
+  insertLink,
+  toggleInline,
+  type BlockKind,
+  type FormatEdit,
+  type InlineMarker,
+  type Selection,
+} from '@/domain/markdown-format';
 import { FolderPickerSheet } from '@/features/timer/folder-picker-sheet';
 
 import { MarkdownView } from './markdown-view';
 import { formatNoteTime, noteDisplayTitle } from './note-format';
+import { OptionSheet, type SheetOption } from './option-sheet';
 import { useNoteEditor } from './use-notes';
 
 const AUTOSAVE_DELAY_MS = 600;
 
-const TOOLS: { icon: IconName; label: string; apply: (body: string, cursor: number) => TextEdit }[] = [
-  { icon: 'plus', label: 'ブロックを追加', apply: (b, c) => toggleLinePrefix(b, c, '- ') },
-  { icon: 'heading', label: '見出し', apply: (b, c) => toggleLinePrefix(b, c, '## ') },
-  { icon: 'checklist', label: 'チェックリスト', apply: (b, c) => toggleLinePrefix(b, c, '- [ ] ') },
-  { icon: 'link', label: 'リンク', apply: (b, c) => insertSnippet(b, c, '[](https://)', 1) },
-  { icon: 'code', label: 'コード', apply: (b, c) => insertSnippet(b, c, '``', 1) },
-  { icon: 'more', label: 'その他の書式', apply: (b, c) => toggleLinePrefix(b, c, '> ') },
+type SheetName = 'block' | 'heading' | 'more';
+
+const HEADING_OPTIONS: { key: string; label: string; level: number }[] = [
+  { key: 'body', label: '本文', level: 0 },
+  { key: 'heading1', label: '見出し1', level: 1 },
+  { key: 'heading2', label: '見出し2', level: 2 },
+  { key: 'heading3', label: '見出し3', level: 3 },
 ];
+
+const BLOCK_OPTIONS: SheetOption[] = [
+  { key: 'body', label: '本文' },
+  { key: 'heading1', label: '見出し1' },
+  { key: 'heading2', label: '見出し2' },
+  { key: 'heading3', label: '見出し3' },
+  { key: 'bullet', label: '箇条書き' },
+  { key: 'numbered', label: '番号付きリスト' },
+  { key: 'check', label: 'チェックリスト', icon: 'checklist' },
+  { key: 'quote', label: '引用' },
+  { key: 'codeblock', label: 'コードブロック', icon: 'code' },
+  { key: 'image', label: '画像', icon: 'image' },
+];
+
+const MORE_OPTIONS: SheetOption[] = [
+  { key: 'bullet', label: '箇条書き' },
+  { key: 'numbered', label: '番号付きリスト' },
+  { key: 'quote', label: '引用' },
+  { key: 'codeblock', label: 'コードブロック', icon: 'code' },
+];
+
+/** Toolbar button, 44pt with radius 16 (Figma 04 › Format toolbar › Tool/*). */
+function ToolButton({
+  label,
+  onPress,
+  primary = false,
+  children,
+}: {
+  label: string;
+  onPress: () => void;
+  primary?: boolean;
+  children: (color: string) => React.ReactNode;
+}) {
+  const colors = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: radius.xl,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: primary ? colors.primary : colors.surfaceMuted,
+      }}
+    >
+      {children(primary ? colors.textOnPrimary : colors.textPrimary)}
+    </Pressable>
+  );
+}
 
 /** Figma 04 ノート詳細: title, folder chip, Markdown body, format toolbar; saves automatically. */
 export function NoteEditorScreen() {
@@ -56,8 +122,10 @@ export function NoteEditorScreen() {
   const [saved, setSaved] = useState(true);
   const [editingBody, setEditingBody] = useState(body === '');
   const [pickingFolder, setPickingFolder] = useState(false);
-  const selection = useRef(body.length);
-  const [sel, setSel] = useState<{ start: number; end: number } | undefined>(undefined);
+  const [sheet, setSheet] = useState<SheetName | null>(null);
+  const [headingLevel, setHeadingLevel] = useState<number | undefined>(undefined);
+  const selection = useRef<Selection>({ start: body.length, end: body.length });
+  const [sel, setSel] = useState<Selection | undefined>(undefined);
   const bodyInput = useRef<TextInput>(null);
 
   // Everything the debounced / unmount save needs lives in refs so it never sees stale state.
@@ -103,11 +171,34 @@ export function NoteEditorScreen() {
     change({ folderId: value });
   };
 
-  const applyTool = (apply: (body: string, cursor: number) => TextEdit) => {
-    const edit = apply(body, selection.current);
-    selection.current = edit.cursor;
+  // Toolbar edits rewrite the Markdown source around the current selection; the DB still stores
+  // only that Markdown string.
+  const applyEdit = (edit: FormatEdit) => {
+    selection.current = edit.selection;
     updateBody(edit.text);
-    setSel({ start: edit.cursor, end: edit.cursor });
+    setSel(edit.selection);
+    bodyInput.current?.focus();
+  };
+  const inline = (marker: InlineMarker) => applyEdit(toggleInline(body, selection.current, marker));
+
+  const addImage = async () => {
+    try {
+      const image = await editor.attachImage();
+      if (image) applyEdit(insertImage(body, selection.current, image.ref, image.alt));
+    } catch {
+      Alert.alert('画像を追加できませんでした', 'もう一度お試しください');
+    }
+  };
+
+  const applyBlockOption = (key: string) => {
+    if (key === 'codeblock') return applyEdit(insertCodeBlock(body, selection.current));
+    if (key === 'image') return void addImage();
+    applyEdit(applyBlock(body, selection.current, key as BlockKind | 'body'));
+  };
+
+  const showPreview = () => {
+    Keyboard.dismiss();
+    setEditingBody(false);
   };
 
   const confirmDelete = () =>
@@ -274,13 +365,10 @@ export function NoteEditorScreen() {
             onChangeText={updateBody}
             selection={sel}
             onSelectionChange={(e) => {
-              selection.current = e.nativeEvent.selection.end;
+              selection.current = e.nativeEvent.selection;
               setSel(e.nativeEvent.selection);
             }}
-            onBlur={() => {
-              if (body.trim() !== '') setEditingBody(false);
-            }}
-            placeholder="Markdownで書く"
+            placeholder="本文を書く"
             placeholderTextColor={colors.textPlaceholder}
             multiline
             autoFocus={body !== '' || title !== ''}
@@ -297,7 +385,10 @@ export function NoteEditorScreen() {
         ) : (
           <Pressable
             accessibilityLabel="本文を編集"
-            onPress={() => setEditingBody(true)}
+            onPress={() => {
+              setEditingBody(true);
+              setTimeout(() => bodyInput.current?.focus(), 0);
+            }}
             style={{ minHeight: 240 }}
           >
             <MarkdownView
@@ -311,8 +402,9 @@ export function NoteEditorScreen() {
         <View
           style={{
             flexDirection: 'row',
-            justifyContent: 'space-between',
-            paddingHorizontal: 24,
+            alignItems: 'center',
+            paddingLeft: 24,
+            paddingRight: 12,
             paddingTop: 12,
             paddingBottom: Math.max(insets.bottom, 16),
             borderTopWidth: 1,
@@ -320,31 +412,98 @@ export function NoteEditorScreen() {
             backgroundColor: colors.surface,
           }}
         >
-          {TOOLS.map((tool, index) => (
-            <Pressable
-              key={tool.label}
-              accessibilityRole="button"
-              accessibilityLabel={tool.label}
-              onPress={() => applyTool(tool.apply)}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: radius.xl,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: index === 0 ? colors.primary : colors.surfaceMuted,
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="always"
+            style={{ flex: 1 }}
+            contentContainerStyle={{ gap: 16, paddingRight: 16 }}
+          >
+            <ToolButton label="ブロックを追加" primary onPress={() => setSheet('block')}>
+              {(color) => <Icon name="plus" size={20} color={color} strokeWidth={2} />}
+            </ToolButton>
+            <ToolButton
+              label="見出し・本文"
+              onPress={() => {
+                setHeadingLevel(currentHeadingLevel(body, selection.current.start));
+                setSheet('heading');
               }}
             >
-              <Icon
-                name={tool.icon}
-                size={20}
-                color={index === 0 ? colors.textOnPrimary : colors.textPrimary}
-                strokeWidth={index === 0 ? 2 : 1.7}
-              />
-            </Pressable>
-          ))}
+              {(color) => <Icon name="heading" size={20} color={color} strokeWidth={1.7} />}
+            </ToolButton>
+            <ToolButton label="太字" onPress={() => inline('**')}>
+              {(color) => <Text style={{ fontFamily: fontFamily.extraBold, fontSize: 18, color }}>B</Text>}
+            </ToolButton>
+            <ToolButton label="斜体" onPress={() => inline('*')}>
+              {(color) => (
+                <Text style={{ fontFamily: fontFamily.bold, fontSize: 18, fontStyle: 'italic', color }}>
+                  I
+                </Text>
+              )}
+            </ToolButton>
+            <ToolButton label="取り消し線" onPress={() => inline('~~')}>
+              {(color) => (
+                <Text
+                  style={{
+                    fontFamily: fontFamily.bold,
+                    fontSize: 18,
+                    textDecorationLine: 'line-through',
+                    color,
+                  }}
+                >
+                  S
+                </Text>
+              )}
+            </ToolButton>
+            <ToolButton
+              label="チェックリスト"
+              onPress={() => applyEdit(applyBlock(body, selection.current, 'check'))}
+            >
+              {(color) => <Icon name="checklist" size={20} color={color} strokeWidth={1.7} />}
+            </ToolButton>
+            <ToolButton label="リンク" onPress={() => applyEdit(insertLink(body, selection.current))}>
+              {(color) => <Icon name="link" size={20} color={color} strokeWidth={1.7} />}
+            </ToolButton>
+            <ToolButton label="インラインコード" onPress={() => inline('`')}>
+              {(color) => <Icon name="code" size={20} color={color} strokeWidth={1.7} />}
+            </ToolButton>
+            <ToolButton label="画像" onPress={() => void addImage()}>
+              {(color) => <Icon name="image" size={20} color={color} strokeWidth={1.7} />}
+            </ToolButton>
+            <ToolButton label="その他の書式" onPress={() => setSheet('more')}>
+              {(color) => <Icon name="more" size={20} color={color} strokeWidth={1.7} />}
+            </ToolButton>
+          </ScrollView>
+          <ToolButton label="プレビュー" onPress={showPreview}>
+            {(color) => <Icon name="eye" size={20} color={color} strokeWidth={1.7} />}
+          </ToolButton>
         </View>
       ) : null}
+      <OptionSheet
+        visible={sheet === 'block'}
+        title="ブロックを追加"
+        options={BLOCK_OPTIONS}
+        onSelect={applyBlockOption}
+        onClose={() => setSheet(null)}
+      />
+      <OptionSheet
+        visible={sheet === 'heading'}
+        title="見出し・本文"
+        options={HEADING_OPTIONS.map((option) => ({
+          key: option.key,
+          label: option.label,
+          selected: headingLevel === option.level,
+        }))}
+        onSelect={applyBlockOption}
+        onClose={() => setSheet(null)}
+      />
+      <OptionSheet
+        visible={sheet === 'more'}
+        title="その他の書式"
+        options={MORE_OPTIONS}
+        onSelect={applyBlockOption}
+        onClose={() => setSheet(null)}
+      />
       <FolderPickerSheet
         visible={pickingFolder}
         folders={folders}

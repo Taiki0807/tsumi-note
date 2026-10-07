@@ -1,12 +1,14 @@
 /**
  * Minimal Markdown parser for notes (Phase 6).
- * Supports headings, bullet / numbered lists, checklists, links, code (inline + fenced), quotes
- * and bold. The Markdown *source* is what gets stored; this only produces a display structure.
+ * Supports headings, bullet / numbered lists, checklists, links, code (inline + fenced), quotes,
+ * bold / italic / strikethrough and standalone images (`![alt](ref)` on a line of its own). The Markdown *source* is what gets stored; this only produces a display structure.
  */
 
 export type InlineNode =
   | { type: 'text'; text: string }
   | { type: 'bold'; text: string }
+  | { type: 'italic'; text: string }
+  | { type: 'strike'; text: string }
   | { type: 'code'; text: string }
   | { type: 'link'; text: string; url: string };
 
@@ -18,9 +20,12 @@ export type MarkdownBlock =
   /** `line` is the 0-based source line, used by `toggleChecklistLine`. */
   | { type: 'check'; checked: boolean; line: number; inline: InlineNode[] }
   | { type: 'quote'; inline: InlineNode[] }
-  | { type: 'code'; text: string };
+  | { type: 'code'; text: string }
+  /** `ref` is the raw URL / `note-image://` reference from the Markdown. */
+  | { type: 'image'; alt: string; ref: string };
 
-const INLINE_PATTERN = /\[([^\]\n]+)\]\(([^)\s]+)\)|`([^`\n]+)`|\*\*([^*\n]+)\*\*/g;
+const INLINE_PATTERN =
+  /\[([^\]\n]+)\]\(([^)\s]+)\)|`([^`\n]+)`|\*\*([^*\n]+)\*\*|~~([^~\n]+)~~|\*([^*\n]+)\*/g;
 
 export function parseInline(source: string): InlineNode[] {
   const nodes: InlineNode[] = [];
@@ -34,6 +39,10 @@ export function parseInline(source: string): InlineNode[] {
       nodes.push({ type: 'code', text: match[3] });
     } else if (match[4] !== undefined) {
       nodes.push({ type: 'bold', text: match[4] });
+    } else if (match[5] !== undefined) {
+      nodes.push({ type: 'strike', text: match[5] });
+    } else if (match[6] !== undefined) {
+      nodes.push({ type: 'italic', text: match[6] });
     }
     last = index + match[0].length;
   }
@@ -47,6 +56,8 @@ const NUMBERED = /^\s*(\d+)[.)]\s+(.*)$/;
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 const QUOTE = /^\s*>\s?(.*)$/;
 const FENCE = /^\s*```/;
+/** An image on a line of its own: `![alt](ref)`. */
+const IMAGE = /^\s*!\[([^\]\n]*)\]\(([^)\s]+)\)\s*$/;
 
 export function parseMarkdown(source: string): MarkdownBlock[] {
   const lines = source.split(/\r\n|\r|\n/);
@@ -73,6 +84,13 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
 
     if (line.trim() === '') {
       flushParagraph();
+      continue;
+    }
+
+    const image = IMAGE.exec(line);
+    if (image) {
+      flushParagraph();
+      blocks.push({ type: 'image', alt: image[1] ?? '', ref: image[2] ?? '' });
       continue;
     }
 

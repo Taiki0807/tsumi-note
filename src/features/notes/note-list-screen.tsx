@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { useEffect } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -101,6 +102,9 @@ export function NoteListScreen() {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const list = useNoteList();
+  const { sweepImages } = list;
+  // Housekeeping once per visit of the list: images dropped from notes while editing are removed.
+  useEffect(() => sweepImages(), [sweepImages]);
   const searching = list.query.trim().length > 0;
 
   const confirmDelete = (row: NoteRow) =>

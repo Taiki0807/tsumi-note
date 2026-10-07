@@ -1,15 +1,27 @@
-import { useMemo, useState } from 'react';
+import { randomUUID } from 'expo-crypto';
+import { useCallback, useMemo, useState } from 'react';
 
 import { useRepositories } from '@/db/database-provider';
+import type { Repositories } from '@/db/repositories';
 import { useRevision } from '@/features/library/use-library';
 
-import { loadNoteDetail, loadNoteList, saveNote, type NoteDetail, type NoteList } from './note-use-cases';
+import { noteImageFiles, pickPhoto } from './note-image-store';
+import { storePickedImage } from './note-images';
+import {
+  loadNoteDetail,
+  loadNoteList,
+  saveNote,
+  sweepNoteImages,
+  type NoteDetail,
+  type NoteList,
+} from './note-use-cases';
 
 export function useNoteList() {
   const repos = useRepositories();
   const { revision, invalidate } = useRevision();
   const [query, setQuery] = useState('');
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
+  const sweepImages = useCallback(() => sweepImagesSafely(repos), [repos]);
 
   const list: NoteList = useMemo(
     () => loadNoteList(repos, { query, folderId }),
@@ -32,9 +44,21 @@ export function useNoteList() {
     },
     deleteNote: (id: string) => {
       repos.notes.softDelete(id);
+      sweepImagesSafely(repos);
       invalidate();
     },
+    /** Housekeeping on opening the list: drops images left behind by earlier edits. */
+    sweepImages,
   };
+}
+
+/** Image cleanup is best-effort: a file error must never block the note operation itself. */
+function sweepImagesSafely(repos: Pick<Repositories, 'notes'>) {
+  try {
+    sweepNoteImages(repos, noteImageFiles);
+  } catch {
+    // Retried on the next sweep.
+  }
 }
 
 export function useNoteEditor(noteId: string | undefined) {
@@ -61,6 +85,14 @@ export function useNoteEditor(noteId: string | undefined) {
       repos.notes.setPinned(id, pinned);
       invalidate();
     },
-    deleteNote: (id: string) => repos.notes.softDelete(id),
+    deleteNote: (id: string) => {
+      repos.notes.softDelete(id);
+      sweepImagesSafely(repos);
+    },
+    /** Copies a picked photo into app storage; returns the Markdown reference to insert. */
+    attachImage: async () => {
+      const picked = await pickPhoto();
+      return picked ? storePickedImage(noteImageFiles, randomUUID, picked) : undefined;
+    },
   };
 }

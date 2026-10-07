@@ -1,8 +1,12 @@
-import { Linking, Pressable, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Image, Linking, Pressable, Text, View } from 'react-native';
 
 import { Icon } from '@/components/icons';
 import { fontFamily, radius, typography, useTheme } from '@/design';
 import { parseMarkdown, type InlineNode } from '@/domain/markdown';
+
+import { noteImageUri } from './note-image-store';
+import { parseImageRef } from './note-images';
 
 function Inline({ nodes }: { nodes: InlineNode[] }) {
   const colors = useTheme();
@@ -13,6 +17,18 @@ function Inline({ nodes }: { nodes: InlineNode[] }) {
           case 'bold':
             return (
               <Text key={i} style={{ fontFamily: fontFamily.extraBold }}>
+                {node.text}
+              </Text>
+            );
+          case 'italic':
+            return (
+              <Text key={i} style={{ fontStyle: 'italic' }}>
+                {node.text}
+              </Text>
+            );
+          case 'strike':
+            return (
+              <Text key={i} style={{ textDecorationLine: 'line-through', color: colors.textSecondary }}>
                 {node.text}
               </Text>
             );
@@ -45,6 +61,52 @@ function Inline({ nodes }: { nodes: InlineNode[] }) {
 }
 
 /**
+ * A `![alt](note-image://file)` block. The reference is resolved to the stored file at render time
+ * (so it survives restarts and container moves); web URLs are shown as-is. A missing file shows a
+ * quiet placeholder instead of breaking the note.
+ */
+function NoteImage({ alt, reference }: { alt: string; reference: string }) {
+  const colors = useTheme();
+  const [failed, setFailed] = useState(false);
+  const fileName = parseImageRef(reference);
+  const uri = fileName ? noteImageUri(fileName) : /^https:\/\//i.test(reference) ? reference : undefined;
+
+  if (!uri || failed) {
+    return (
+      <View
+        accessibilityLabel={`画像を表示できません: ${alt}`}
+        style={{
+          height: 96,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: radius.md,
+          backgroundColor: colors.surfaceMuted,
+        }}
+      >
+        <Icon name="image" size={24} color={colors.textSecondary} />
+        <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
+          画像を表示できません
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <Image
+      accessibilityLabel={alt || '画像'}
+      source={{ uri }}
+      resizeMode="contain"
+      onError={() => setFailed(true)}
+      style={{
+        width: '100%',
+        aspectRatio: 4 / 3,
+        borderRadius: radius.md,
+        backgroundColor: colors.surfaceMuted,
+      }}
+    />
+  );
+}
+
+/**
  * Figma 04 › Markdown body: 18/800 headings, 15/500 body (24pt line), 24pt rounded checkboxes,
  * a primary-soft quote card (radius 12, padding 16/14), 10pt gap between blocks.
  */
@@ -70,7 +132,11 @@ export function MarkdownView({
                 accessibilityRole="header"
                 style={{
                   fontFamily: fontFamily.extraBold,
-                  ...typography.headingSm,
+                  ...(block.level === 1
+                    ? typography.heading
+                    : block.level === 2
+                      ? typography.headingSm
+                      : typography.button),
                   color: colors.textPrimary,
                   paddingTop: 4,
                 }}
@@ -78,6 +144,8 @@ export function MarkdownView({
                 <Inline nodes={block.inline} />
               </Text>
             );
+          case 'image':
+            return <NoteImage key={i} alt={block.alt} reference={block.ref} />;
           case 'bullet':
           case 'numbered':
             return (

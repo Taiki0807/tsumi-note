@@ -1,6 +1,7 @@
 import type { Folder, Note, NoteInput, Repositories } from '@/db/repositories';
 
 import { isNoteEmpty } from './note-format';
+import { removeOrphanImages, type ImageFiles } from './note-images';
 
 type NoteRepos = Pick<Repositories, 'folders' | 'notes'>;
 
@@ -60,4 +61,20 @@ export function saveNote(
   }
   notes.update(noteId, input);
   return noteId;
+}
+
+/**
+ * Use case: removes stored images that no live note references any more (deleted notes, images
+ * removed from the text). Recently added files are kept until their note has had time to save.
+ */
+export function sweepNoteImages(
+  { notes }: Pick<Repositories, 'notes'>,
+  files: ImageFiles,
+  now: number = Date.now(),
+): string[] {
+  return removeOrphanImages(
+    files,
+    notes.list().map((note) => note.body),
+    now,
+  );
 }
