@@ -9,7 +9,8 @@ export type InlineNode =
   /** Any combination of bold / italic / strikethrough, so `***a***` is a single node. */
   | { type: 'styled'; text: string; bold: boolean; italic: boolean; strike: boolean }
   | { type: 'code'; text: string }
-  | { type: 'link'; text: string; url: string };
+  /** Inherits the surrounding emphasis; the flags are omitted when the link is unstyled. */
+  | { type: 'link'; text: string; url: string; bold?: boolean; italic?: boolean; strike?: boolean };
 
 export type MarkdownBlock =
   | { type: 'heading'; level: number; inline: InlineNode[] }
@@ -47,8 +48,10 @@ function parseStyled(source: string, style: InlineStyle): InlineNode[] {
     const index = match.index ?? 0;
     if (index > last) nodes.push(textNode(source.slice(last, index), style));
     if (match[1] !== undefined && match[2] !== undefined) {
-      nodes.push({ type: 'link', text: match[1], url: match[2] });
+      const styled = style.bold || style.italic || style.strike;
+      nodes.push({ type: 'link', text: match[1], url: match[2], ...(styled ? style : {}) });
     } else if (match[3] !== undefined) {
+      // Inline code is literal: its content is not re-parsed and outer emphasis does not apply.
       nodes.push({ type: 'code', text: match[3] });
     } else if (match[4] !== undefined) {
       nodes.push(...parseStyled(match[4], { ...style, bold: true, italic: true }));

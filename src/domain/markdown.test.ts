@@ -153,3 +153,36 @@ describe('editing helpers', () => {
     expect(insertSnippet('ab', 99, 'x')).toEqual({ text: 'abx', cursor: 3 });
   });
 });
+
+describe('parseInline: links inherit the surrounding emphasis', () => {
+  const url = 'https://example.com';
+  const link = (flags: object) => [{ type: 'link', text: 'label', url, ...flags }];
+
+  it('applies bold / italic / bold+italic / strike to a link', () => {
+    expect(parseInline(`**[label](${url})**`)).toEqual(link({ bold: true, italic: false, strike: false }));
+    expect(parseInline(`*[label](${url})*`)).toEqual(link({ bold: false, italic: true, strike: false }));
+    expect(parseInline(`***[label](${url})***`)).toEqual(link({ bold: true, italic: true, strike: false }));
+    expect(parseInline(`~~[label](${url})~~`)).toEqual(link({ bold: false, italic: false, strike: true }));
+  });
+
+  it('applies the same emphasis to text and link in one span', () => {
+    expect(parseInline(`**bold and [link](${url})**`)).toEqual([
+      { type: 'styled', text: 'bold and ', bold: true, italic: false, strike: false },
+      { type: 'link', text: 'link', url, bold: true, italic: false, strike: false },
+    ]);
+  });
+
+  it('keeps ***text*** as one bold + italic node', () => {
+    expect(parseInline('***text***')).toEqual([
+      { type: 'styled', text: 'text', bold: true, italic: true, strike: false },
+    ]);
+  });
+
+  it('keeps inline code literal inside emphasis', () => {
+    expect(parseInline('**a `*b*` c**')).toEqual([
+      { type: 'styled', text: 'a ', bold: true, italic: false, strike: false },
+      { type: 'code', text: '*b*' },
+      { type: 'styled', text: ' c', bold: true, italic: false, strike: false },
+    ]);
+  });
+});

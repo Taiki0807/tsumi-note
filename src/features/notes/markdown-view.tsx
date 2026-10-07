@@ -40,7 +40,12 @@ function Inline({ nodes }: { nodes: InlineNode[] }) {
               <Text
                 key={i}
                 accessibilityRole="link"
-                style={{ color: colors.primary, textDecorationLine: 'underline' }}
+                style={{
+                  color: colors.primary,
+                  textDecorationLine: node.strike ? 'underline line-through' : 'underline',
+                  ...(node.bold ? { fontFamily: fontFamily.extraBold } : {}),
+                  ...(node.italic ? { fontStyle: 'italic' as const } : {}),
+                }}
                 onPress={() => {
                   // Only web links are opened from a note.
                   if (/^https?:\/\//i.test(node.url)) void Linking.openURL(node.url);
