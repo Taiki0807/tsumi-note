@@ -1,15 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Dimensions, Modal, PanResponder, Pressable, Text, View } from 'react-native';
-import Animated, {
-  Easing,
-  cancelAnimation,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import { Modal, Pressable, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useSheetMotion } from '@/components/use-sheet-motion';
 import { fontFamily, radius, shadow, typography, useTheme } from '@/design';
 
 import type { TimerSettings } from './timer-logic';
@@ -22,87 +15,18 @@ type Props = {
   onClose: () => void;
 };
 
-const OPEN_MS = 280;
-const CLOSE_MS = 220;
-const HIDDEN_Y = Dimensions.get('window').height;
-const DISMISS_DRAG = 80;
-
 /**
  * Timer-only settings shown as a bottom sheet on its own layer, so the timer screen never reflows.
  * The sheet slides up from the bottom edge (no bounce) and slides back down on close; it can be
  * dismissed via the backdrop, the 完了 button, or by dragging the handle downwards.
+ * Open/close motion lives in `useSheetMotion`, shared with the library form sheets.
  * Not designed in Figma (PRODUCT_SPEC: 未デザイン); built from existing tokens only.
  * App-wide settings (e.g. dark mode) intentionally do not live here.
  */
 export function TimerSettingsModal({ visible, settings, onChange, onClose }: Props) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
-  // Keep the Modal mounted while the exit animation runs.
-  const [mounted, setMounted] = useState(visible);
-  // 0 = hidden, 1 = fully shown
-  const progress = useSharedValue(0);
-  const drag = useSharedValue(0);
-
-  if (visible && !mounted) setMounted(true);
-
-  useEffect(() => {
-    cancelAnimation(progress);
-    if (visible) {
-      drag.set(0);
-      progress.set(withTiming(1, { duration: OPEN_MS, easing: Easing.out(Easing.cubic) }));
-    } else {
-      progress.set(
-        withTiming(0, { duration: CLOSE_MS, easing: Easing.in(Easing.cubic) }, (finished) => {
-          if (finished) runOnJS(setMounted)(false);
-        }),
-      );
-    }
-  }, [visible, progress, drag]);
-
-  // Slide out from the current drag offset (no jump), then notify the parent.
-  const dismissFromDrag = useMemo(
-    () => () => {
-      drag.set(
-        withTiming(HIDDEN_Y, { duration: CLOSE_MS, easing: Easing.in(Easing.cubic) }, (finished) => {
-          if (finished) runOnJS(onClose)();
-        }),
-      );
-    },
-    [drag, onClose],
-  );
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => {
-          cancelAnimation(drag);
-        },
-        onPanResponderMove: (_, g) => {
-          drag.set(Math.max(0, g.dy));
-        },
-        onPanResponderRelease: (_, g) => {
-          if (g.dy > DISMISS_DRAG || g.vy > 0.8) {
-            dismissFromDrag();
-          } else {
-            drag.set(withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) }));
-          }
-        },
-        onPanResponderTerminate: () => {
-          drag.set(withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) }));
-        },
-      }),
-    [drag, dismissFromDrag],
-  );
-
-  const backdropStyle = useAnimatedStyle(() => ({
-    opacity: progress.value * Math.max(0, 1 - drag.value / HIDDEN_Y),
-  }));
-  const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: (1 - progress.value) * HIDDEN_Y + drag.value }],
-  }));
+  const { mounted, panHandlers, backdropStyle, sheetStyle } = useSheetMotion({ visible, onClose });
 
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
@@ -138,7 +62,7 @@ export function TimerSettingsModal({ visible, settings, onChange, onClose }: Pro
           ]}
         >
           <View
-            {...panResponder.panHandlers}
+            {...panHandlers}
             style={{
               alignItems: 'center',
               paddingTop: 12,

@@ -9,11 +9,13 @@ import {
   View,
   type TextInputProps,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 
 import { Icon, type IconName } from './icons';
+import { useSheetMotion } from './use-sheet-motion';
 
 /** Figma Button (Primary / Secondary): 56pt high, fully rounded, Label 16/24 ExtraBold. */
 export function Button({
@@ -148,36 +150,59 @@ export function BottomSheet({
 }) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
+  // Open/close animation, backdrop fade and grabber drag are shared with the timer settings sheet.
+  const { mounted, panHandlers, backdropStyle, sheetStyle } = useSheetMotion({ visible, onClose });
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(20,16,48,0.5)' }}
+        style={{ flex: 1, justifyContent: 'flex-end' }}
       >
-        <Pressable accessibilityLabel="閉じる" onPress={onClose} style={{ flex: 1 }} />
-        <View
-          style={{
-            alignSelf: 'center',
-            width: '100%',
-            maxWidth: layout.contentMaxWidth,
-            gap: 20,
-            paddingTop: 12,
-            paddingHorizontal: 24,
-            paddingBottom: Math.max(insets.bottom, 36),
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            backgroundColor: colors.surface,
-            shadowColor: '#04060f',
-            shadowOffset: { width: 0, height: -8 },
-            shadowOpacity: 0.08,
-            shadowRadius: 32,
-          }}
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              bottom: 0,
+              left: 0,
+              backgroundColor: 'rgba(20,16,48,0.5)',
+            },
+            backdropStyle,
+          ]}
         >
-          <View style={{ alignItems: 'center' }}>
+          <Pressable accessibilityLabel="閉じる" onPress={onClose} style={{ flex: 1 }} />
+        </Animated.View>
+        <Animated.View
+          style={[
+            {
+              alignSelf: 'center',
+              width: '100%',
+              maxWidth: layout.contentMaxWidth,
+              gap: 20,
+              paddingTop: 12,
+              paddingHorizontal: 24,
+              paddingBottom: Math.max(insets.bottom, 36),
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              backgroundColor: colors.surface,
+              shadowColor: '#04060f',
+              shadowOffset: { width: 0, height: -8 },
+              shadowOpacity: 0.08,
+              shadowRadius: 32,
+            },
+            sheetStyle,
+          ]}
+        >
+          {/* Enlarged drag target; negative margins keep the visual layout unchanged. */}
+          <View
+            {...panHandlers}
+            style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 12, marginTop: -12, marginBottom: -12 }}
+          >
             <View style={{ width: 40, height: 5, borderRadius: 3, backgroundColor: colors.border }} />
           </View>
           {children}
-        </View>
+        </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
   );
