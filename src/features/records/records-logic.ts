@@ -133,6 +133,16 @@ export function formatFocusMinutes(seconds: number): string {
   return `${Math.floor(Math.max(0, seconds) / 60)}分`;
 }
 
+/**
+ * Label shown above a weekly chart bar, e.g. 「10分」. Minutes are rounded down like the weekly total;
+ * days without records return null (no 「0分」 clutter), sub-minute days show 「<1分」.
+ */
+export function formatDayLabel(seconds: number): string | null {
+  if (seconds <= 0) return null;
+  const minutes = Math.floor(seconds / 60);
+  return minutes === 0 ? '<1分' : `${minutes}分`;
+}
+
 export type DiffChip = { kind: 'up' | 'down' | 'same'; label: string };
 
 /** Previous-week comparison chip, e.g. 「+45分 前週比」. Minutes are rounded to the nearest. */

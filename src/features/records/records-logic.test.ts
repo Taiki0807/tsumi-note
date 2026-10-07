@@ -17,6 +17,7 @@ import {
   addWeeks,
   buildWeeklyRecord,
   chartMaxHours,
+  formatDayLabel,
   formatDiff,
   formatFocusMinutes,
   formatWeekRange,
@@ -155,6 +156,35 @@ describe('buildWeeklyRecord', () => {
   });
 });
 
+describe('daily chart labels from weekly record', () => {
+  const labels = (sessions: SessionLike[], weekStart = WEEK) =>
+    buildWeeklyRecord(sessions, weekStart).days.map((d) => formatDayLabel(d.seconds));
+
+  it('shows 0 / 1 / 10+ minute days and sums multiple sessions of one day', () => {
+    const sessions = [
+      session(local(2026, 9, 9, 10), 1), // Wed 1分
+      session(local(2026, 9, 10, 9), 4), // Thu 4 + 6 = 10分
+      session(local(2026, 9, 10, 20), 6),
+      session(local(2026, 9, 12, 8), 25), // Sat 25分
+    ];
+    expect(labels(sessions)).toEqual([null, null, '1分', '10分', null, '25分', null]);
+  });
+
+  it('daily seconds add up to the weekly total', () => {
+    const sessions = [session(local(2026, 9, 9, 10), 1), session(local(2026, 9, 10, 9), 9)];
+    const record = buildWeeklyRecord(sessions, WEEK);
+    expect(record.days.reduce((s, d) => s + d.seconds, 0)).toBe(record.totalSeconds);
+    expect(splitDuration(record.totalSeconds)).toEqual({ hours: 0, minutes: 10 });
+  });
+
+  it('shows each week’s own daily data when moving to previous / next weeks', () => {
+    const sessions = [session(local(2026, 9, 2, 10), 7), session(local(2026, 9, 10, 10), 10)];
+    expect(labels(sessions, addWeeks(WEEK, -1))).toEqual([null, null, '7分', null, null, null, null]);
+    expect(labels(sessions, WEEK)).toEqual([null, null, null, '10分', null, null, null]);
+    expect(labels(sessions, addWeeks(WEEK, 1))).toEqual(Array(7).fill(null));
+  });
+});
+
 describe('formatting', () => {
   it('formats the diff chip', () => {
     expect(formatDiff(-30 * 60)).toEqual({ kind: 'down', label: '-30分 前週比' });
@@ -166,6 +196,14 @@ describe('formatting', () => {
   it('splits durations into hours and minutes', () => {
     expect(splitDuration(325 * 60 + 59)).toEqual({ hours: 5, minutes: 25 });
     expect(splitDuration(0)).toEqual({ hours: 0, minutes: 0 });
+  });
+
+  it('labels chart bars: hidden for 0, 「<1分」 under a minute, minutes otherwise', () => {
+    expect(formatDayLabel(0)).toBeNull();
+    expect(formatDayLabel(30)).toBe('<1分');
+    expect(formatDayLabel(60)).toBe('1分');
+    expect(formatDayLabel(10 * 60 + 59)).toBe('10分');
+    expect(formatDayLabel(125 * 60)).toBe('125分');
   });
 
   it('keeps the chart axis on even whole hours, at least 2h', () => {

@@ -7,6 +7,7 @@ import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/desi
 
 import {
   chartMaxHours,
+  formatDayLabel,
   formatDiff,
   formatWeekRange,
   splitDuration,
@@ -58,9 +59,24 @@ function WeekChart({ days, maxHours, today }: { days: DayRecord[]; maxHours: num
         {days.map((day) => {
           const isToday = day.dayStart === today;
           const height = (day.seconds / 3600 / maxHours) * CHART_HEIGHT;
+          const label = formatDayLabel(day.seconds);
           return (
             <View key={day.dayStart} style={{ flex: 1, alignItems: 'center' }}>
               <View style={{ height: CHART_HEIGHT, justifyContent: 'flex-end' }}>
+                {label && (
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      marginBottom: 4,
+                      fontFamily: fontFamily.extraBold,
+                      fontSize: 11,
+                      lineHeight: 16,
+                      color: isToday ? colors.primary : colors.textSecondary,
+                    }}
+                  >
+                    {label}
+                  </Text>
+                )}
                 <View
                   accessibilityLabel={`${WEEKDAY_LABELS[day.weekdayIndex]}曜日 ${Math.floor(day.seconds / 60)}分`}
                   style={{
@@ -172,7 +188,8 @@ export function RecordsScreen() {
           paddingBottom: 8,
         }}
       >
-        <AppIcon size={32} cornerRadius={8} />
+        {/* Figma 192:257 › AppIcon (200:496): 32×32, cornerRadius 8 (of 32) → 200-grid radius 50. */}
+        <AppIcon size={32} cornerRadius={8 * (200 / 32)} />
         <Text
           accessibilityRole="header"
           style={{
