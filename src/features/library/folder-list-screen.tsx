@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -79,7 +79,7 @@ function FolderCard({ folder, index }: { folder: FolderSummary; index: number })
 }
 
 /** Figma 07 フォルダー一覧 (shown in the 復習 tab, whose tab is active in the design). */
-export function FolderListScreen() {
+export function FolderListScreen({ header }: { header?: ReactNode } = {}) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const { folders, totalQuestions, createFolder } = useFolderList();
@@ -116,6 +116,7 @@ export function FolderListScreen() {
           paddingBottom: 24,
         }}
       >
+        {header}
         <View style={{ gap: 2 }}>
           <Text
             style={{ fontFamily: fontFamily.extraBold, ...typography.headingSm, color: colors.textPrimary }}

@@ -1,0 +1,1 @@
+ALTER TABLE `fsrs_states` DROP COLUMN `card`;

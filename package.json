@@ -40,7 +40,8 @@
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
     "react-native-worklets": "0.10.1",
-    "tailwindcss": "3"
+    "tailwindcss": "3",
+    "ts-fsrs": "^5.4.2"
   },
   "devDependencies": {
     "@testing-library/react-native": "^14.0.1",
