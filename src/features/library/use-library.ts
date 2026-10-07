@@ -14,7 +14,7 @@ import {
 import type { QuestionFilter } from './question-list';
 
 /** Returns a counter that bumps on screen focus and on `invalidate()` (after a write). No polling. */
-function useRevision() {
+export function useRevision() {
   const [revision, setRevision] = useState(0);
   const invalidate = useCallback(() => setRevision((r) => r + 1), []);
   useFocusEffect(invalidate);

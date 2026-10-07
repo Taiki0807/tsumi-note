@@ -22,6 +22,12 @@
       "expo-sqlite",
       "expo-notifications",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "ノートに挿入する画像を選ぶために、写真ライブラリへアクセスします。"
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#6949ff",

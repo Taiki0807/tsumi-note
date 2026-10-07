@@ -1,5 +1,3 @@
-import { PlaceholderScreen } from '@/components/placeholder-screen';
+import { NoteListScreen } from '@/features/notes/note-list-screen';
 
-export default function NotesScreen() {
-  return <PlaceholderScreen title="ノート" phase={6} />;
-}
+export default NoteListScreen;

@@ -20,7 +20,14 @@ export type IconName =
   | 'search'
   | 'folder'
   | 'flame'
-  | 'chevron-down';
+  | 'chevron-down'
+  | 'pin'
+  | 'heading'
+  | 'checklist'
+  | 'link'
+  | 'code'
+  | 'image'
+  | 'eye';
 
 type Props = {
   name: IconName;
@@ -94,7 +101,10 @@ export function Icon({ name, size, color, strokeWidth = 2, handsColor }: Props) 
       {name === 'chevron-right' && <Path d="M9 5l7 7-7 7" {...common} />}
       {name === 'chevron-down' && <Path d="M5 9l7 7 7-7" {...common} />}
       {name === 'flame' && (
-        <Path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 1.5 1 2 1.5 2C10.5 8 11 5.5 12 3z" {...common} />
+        <Path
+          d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 1.5 1 2 1.5 2C10.5 8 11 5.5 12 3z"
+          {...common}
+        />
       )}
       {name === 'arrow-left' && <Path d="M19 12H5M11 6l-6 6 6 6" {...common} />}
       {name === 'plus' && <Path d="M12 5v14M5 12h14" {...common} />}
@@ -115,6 +125,41 @@ export function Icon({ name, size, color, strokeWidth = 2, handsColor }: Props) 
         <>
           <Circle cx={11} cy={11} r={7} {...common} />
           <Path d="M16.5 16.5L21 21" {...common} />
+        </>
+      )}
+      {name === 'pin' && (
+        <>
+          <Path d="M9 4h6l-1 6 3 3H7l3-3z" {...common} />
+          <Path d="M12 13v7" {...common} />
+        </>
+      )}
+      {name === 'heading' && <Path d="M5 5v14M19 5v14M5 12h14" {...common} />}
+      {name === 'checklist' && (
+        <>
+          <Path d="M3.5 6.5l2 2 3.5-4" {...common} />
+          <Path d="M12 7h8" {...common} />
+          <Path d="M3.5 16.5l2 2 3.5-4" {...common} />
+          <Path d="M12 17h8" {...common} />
+        </>
+      )}
+      {name === 'link' && (
+        <>
+          <Path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" {...common} />
+          <Path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" {...common} />
+        </>
+      )}
+      {name === 'code' && <Path d="M8 7l-5 5 5 5M16 7l5 5-5 5" {...common} />}
+      {name === 'image' && (
+        <>
+          <Rect x={3.5} y={4.5} width={17} height={15} rx={2.5} {...common} />
+          <Circle cx={9} cy={10} r={1.5} {...common} />
+          <Path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5" {...common} />
+        </>
+      )}
+      {name === 'eye' && (
+        <>
+          <Path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" {...common} />
+          <Circle cx={12} cy={12} r={3} {...common} />
         </>
       )}
       {name === 'user' && (
