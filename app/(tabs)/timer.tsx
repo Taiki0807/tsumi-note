@@ -14,6 +14,7 @@ export default function TimerScreen() {
   const insets = useSafeAreaInsets();
   const timer = useTimer();
   const [showSettings, setShowSettings] = useState(false);
+  // `state.settings` is the session snapshot; `settings` is the editable value for the next start.
   const { state, settings } = timer;
   const { status } = state;
 
@@ -78,7 +79,7 @@ export default function TimerScreen() {
 
           <View style={{ marginTop: 20, alignItems: 'center', gap: 8 }}>
             <Text style={{ fontFamily: fontFamily.bold, ...typography.bodySm, color: colors.textSecondary }}>
-              ラウンド {state.round} / {settings.rounds}
+              ラウンド {state.round} / {state.settings.rounds}
             </Text>
             <View style={{ flexDirection: 'row', gap: 6 }}>
               {Array.from({ length: state.settings.rounds }, (_, i) => (

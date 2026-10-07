@@ -172,6 +172,40 @@ describe('planBoundaries', () => {
   });
 });
 
+describe('settings edited during a session', () => {
+  const edited: TimerSettings = { focusMinutes: 10, breakMinutes: 2, rounds: 3 };
+
+  it('running / paused keep the start snapshot (rounds, focus, break) for display and progress', () => {
+    const running = start(createIdleState(settings), settings, T0, newId);
+    const paused = pause(running, T0 + 5 * MIN);
+    for (const s of [running, paused, resume(paused, T0 + 6 * MIN)]) {
+      // The UI shows `state.settings.rounds`, which is unaffected by the edited value.
+      expect(s.settings).toEqual(settings);
+      expect(s.settings.rounds).toBe(2);
+    }
+  });
+
+  it('completes using the snapshot even though newer settings exist', () => {
+    const running = start(createIdleState(settings), settings, T0, newId);
+    // `edited` is saved while running, but never reaches the state.
+    const result = advance(running, T0 + 55 * MIN);
+    expect(result.state.status).toBe('completed');
+    expect(result.completedFocus).toHaveLength(2);
+    expect(result.completedFocus.every((f) => f.durationSeconds === 25 * 60)).toBe(true);
+    expect(planBoundaries(running)).toHaveLength(3);
+  });
+
+  it('applies the edited settings from the next start', () => {
+    const running = start(createIdleState(settings), settings, T0, newId);
+    const done = advance(running, T0 + 55 * MIN).state;
+    const next = start(done, edited, T0 + 60 * MIN, () => 'run-2');
+    expect(next.settings).toEqual(edited);
+    expect(next.targetEndAt).toBe(T0 + 70 * MIN);
+    expect(planBoundaries(next)).toHaveLength(5);
+    expect(start(reset(edited), edited, T0, newId).settings.rounds).toBe(3);
+  });
+});
+
 describe('formatRemaining', () => {
   it('formats mm:ss', () => {
     expect(formatRemaining(25 * MIN)).toBe('25:00');
