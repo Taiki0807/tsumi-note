@@ -1,7 +1,7 @@
 import type { Folder, Note, NoteInput, Repositories } from '@/db/repositories';
 
 import { isNoteEmpty } from './note-format';
-import { removeOrphanImages, type ImageFiles } from './note-images';
+import { extractImageFiles, removeOrphanImages, type ImageFiles } from './note-images';
 
 type NoteRepos = Pick<Repositories, 'folders' | 'notes'>;
 
@@ -49,18 +49,63 @@ export function loadNoteDetail({ folders, notes }: NoteRepos, noteId: string): N
 /**
  * Use case (auto-save): creates the note on its first non-empty save, updates it afterwards.
  * Returns the note id, or `undefined` while a new note is still empty (nothing is written).
+ *
+ * With `files`, images the previous body referenced but the saved body no longer does are released
+ * *after* the write succeeded (a failed write throws before any file is touched).
  */
 export function saveNote(
   { notes }: Pick<Repositories, 'notes'>,
   noteId: string | undefined,
   input: NoteInput,
+  files?: ImageFiles,
 ): string | undefined {
   if (noteId === undefined) {
     if (isNoteEmpty(input)) return undefined;
     return notes.create(input).id;
   }
+  const before = notes.getById(noteId)?.body ?? '';
   notes.update(noteId, input);
+  if (files) {
+    const kept = extractImageFiles(input.body);
+    releaseImages(
+      { notes },
+      files,
+      extractImageFiles(before).filter((f) => !kept.includes(f)),
+    );
+  }
   return noteId;
+}
+
+/** Use case: tombstones a note, then releases the images only it referenced. */
+export function deleteNote({ notes }: Pick<Repositories, 'notes'>, noteId: string, files?: ImageFiles): void {
+  const candidates = extractImageFiles(notes.getById(noteId)?.body ?? '');
+  notes.softDelete(noteId);
+  if (files) releaseImages({ notes }, files, candidates);
+}
+
+/**
+ * Removes `candidates` (files a just-persisted change stopped referencing) unless a live note still
+ * references them. No grace period: these files were known to be referenced, so they are not
+ * "new, not yet saved" images. Best-effort: file errors are left for the next `sweepNoteImages`.
+ */
+export function releaseImages(
+  { notes }: Pick<Repositories, 'notes'>,
+  files: ImageFiles,
+  candidates: string[],
+): string[] {
+  if (candidates.length === 0) return [];
+  const used = new Set(notes.list().flatMap((note) => extractImageFiles(note.body)));
+  const removed: string[] = [];
+  for (const fileName of candidates) {
+    if (used.has(fileName)) continue;
+    try {
+      files.remove(fileName);
+      removed.push(fileName);
+    } catch {
+      // Picked up by the next sweep.
+    }
+  }
+  return removed;
 }
 
 /**

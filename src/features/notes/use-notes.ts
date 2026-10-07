@@ -10,6 +10,7 @@ import { storePickedImage } from './note-images';
 import {
   loadNoteDetail,
   loadNoteList,
+  deleteNote as deleteNoteUseCase,
   saveNote,
   sweepNoteImages,
   type NoteDetail,
@@ -43,11 +44,10 @@ export function useNoteList() {
       invalidate();
     },
     deleteNote: (id: string) => {
-      repos.notes.softDelete(id);
-      sweepImagesSafely(repos);
+      deleteNoteUseCase(repos, id, noteImageFiles);
       invalidate();
     },
-    /** Housekeeping on opening the list: drops images left behind by earlier edits. */
+    /** Fallback on opening the list: drops images the save / delete release missed (e.g. file errors). */
     sweepImages,
   };
 }
@@ -80,14 +80,13 @@ export function useNoteEditor(noteId: string | undefined) {
     ),
     /** Creates the note on first non-empty save; returns its id. */
     save: (id: string | undefined, input: { title: string; body: string; folderId: string | null }) =>
-      saveNote(repos, id, input),
+      saveNote(repos, id, input, noteImageFiles),
     setPinned: (id: string, pinned: boolean) => {
       repos.notes.setPinned(id, pinned);
       invalidate();
     },
     deleteNote: (id: string) => {
-      repos.notes.softDelete(id);
-      sweepImagesSafely(repos);
+      deleteNoteUseCase(repos, id, noteImageFiles);
     },
     /** Copies a picked photo into app storage; returns the Markdown reference to insert. */
     attachImage: async () => {

@@ -16,7 +16,7 @@ import {
   storePickedImage,
   type ImageFiles,
 } from './note-images';
-import { saveNote, sweepNoteImages } from './note-use-cases';
+import { deleteNote, saveNote, sweepNoteImages } from './note-use-cases';
 
 /** In-memory stand-in for the app's image directory. Survives "restarts" because tests share it. */
 function fakeFiles(initial: Record<string, number> = {}) {
@@ -170,6 +170,105 @@ describe('orphan images', () => {
     expect(sweepNoteImages(repos, files, day * 2)).toEqual([]);
     repos.notes.softDelete(second.id);
     expect(sweepNoteImages(repos, files, day * 2)).toEqual(['a.jpg']);
+  });
+});
+
+describe('image release on save / delete (no list screen involved)', () => {
+  const ref = (n: string) => `![](note-image://${n})`;
+  /** Files are brand new (inside the grace period) to prove release does not depend on age. */
+  const setup = (names: string[]) => {
+    const fake = fakeFiles(Object.fromEntries(names.map((n) => [n, 1_000])));
+    const repos = createRepositories(createTestDeps().deps);
+    return { ...fake, repos };
+  };
+
+  it('removes an image right after it is deleted from the saved text', () => {
+    const { files, store, repos } = setup(['a.jpg']);
+    const id = saveNote(repos, undefined, { title: 'T', body: ref('a.jpg'), folderId: null }, files)!;
+    saveNote(repos, id, { title: 'T', body: '本文のみ', folderId: null }, files);
+    expect([...store.keys()]).toEqual([]);
+    expect(repos.notes.getById(id)?.body).toBe('本文のみ');
+  });
+
+  it('removes only the deleted one of several images', () => {
+    const { files, store, repos } = setup(['a.jpg', 'b.jpg', 'c.jpg']);
+    const body = [ref('a.jpg'), ref('b.jpg'), ref('c.jpg')].join('\n');
+    const id = saveNote(repos, undefined, { title: 'T', body, folderId: null }, files)!;
+    saveNote(repos, id, { title: 'T', body: [ref('a.jpg'), ref('c.jpg')].join('\n'), folderId: null }, files);
+    expect([...store.keys()].sort()).toEqual(['a.jpg', 'c.jpg']);
+  });
+
+  it('keeps an image another note still references', () => {
+    const { files, store, repos } = setup(['a.jpg']);
+    const first = saveNote(repos, undefined, { title: 'A', body: ref('a.jpg'), folderId: null }, files)!;
+    saveNote(repos, undefined, { title: 'B', body: ref('a.jpg'), folderId: null }, files);
+    saveNote(repos, first, { title: 'A', body: 'なし', folderId: null }, files);
+    expect([...store.keys()]).toEqual(['a.jpg']);
+  });
+
+  it('never deletes a file when the save fails', () => {
+    const { files, store, repos } = setup(['a.jpg']);
+    const id = saveNote(repos, undefined, { title: 'T', body: ref('a.jpg'), folderId: null }, files)!;
+    expect(() =>
+      saveNote(repos, id, { title: 'T', body: 'なし', folderId: 'missing-folder' }, files),
+    ).toThrow();
+    expect([...store.keys()]).toEqual(['a.jpg']);
+    expect(repos.notes.getById(id)?.body).toBe(ref('a.jpg'));
+  });
+
+  it('cleans up the images of a deleted note: none, one, several', () => {
+    const { files, store, repos } = setup(['a.jpg', 'b.jpg', 'c.jpg']);
+    const none = repos.notes.create({ body: 'text' });
+    const one = repos.notes.create({ body: ref('a.jpg') });
+    const many = repos.notes.create({ body: [ref('b.jpg'), ref('c.jpg')].join('\n') });
+    deleteNote(repos, none.id, files);
+    expect(store.size).toBe(3);
+    deleteNote(repos, one.id, files);
+    expect([...store.keys()].sort()).toEqual(['b.jpg', 'c.jpg']);
+    deleteNote(repos, many.id, files);
+    expect(store.size).toBe(0);
+  });
+
+  it('keeps a deleted note’s image while another note uses it', () => {
+    const { files, store, repos } = setup(['a.jpg']);
+    const one = repos.notes.create({ body: ref('a.jpg') });
+    repos.notes.create({ body: ref('a.jpg') });
+    deleteNote(repos, one.id, files);
+    expect([...store.keys()]).toEqual(['a.jpg']);
+  });
+
+  it('survives a file error and leaves the file for the fallback sweep', () => {
+    const { files, repos } = setup(['a.jpg']);
+    const note = repos.notes.create({ body: ref('a.jpg') });
+    const broken: ImageFiles = {
+      ...files,
+      remove: () => {
+        throw new Error('io');
+      },
+    };
+    expect(() => deleteNote(repos, note.id, broken)).not.toThrow();
+    expect(repos.notes.getById(note.id)).toBeUndefined();
+    expect(sweepNoteImages(repos, files, ORPHAN_GRACE_MS * 2)).toEqual(['a.jpg']);
+  });
+
+  it('keeps referenced images after a restart (DB reopened)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tsumi-notes-'));
+    const dbFile = path.join(dir, 'app.db');
+    const { files, store } = fakeFiles({ 'a.jpg': 0, 'b.jpg': 0 });
+    const first = createRepositories(createTestDeps(createTestDatabase(dbFile)).deps);
+    const id = saveNote(
+      first,
+      undefined,
+      { title: 'T', body: `${ref('a.jpg')}\n${ref('b.jpg')}`, folderId: null },
+      files,
+    )!;
+    saveNote(first, id, { title: 'T', body: ref('a.jpg'), folderId: null }, files);
+
+    const second = createRepositories(createTestDeps(createTestDatabase(dbFile)).deps);
+    expect(extractImageFiles(second.notes.getById(id)?.body ?? '')).toEqual(['a.jpg']);
+    expect(sweepNoteImages(second, files, ORPHAN_GRACE_MS * 2)).toEqual([]);
+    expect([...store.keys()]).toEqual(['a.jpg']);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 
