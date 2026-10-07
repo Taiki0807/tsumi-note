@@ -44,8 +44,10 @@ export type FolderDetail = {
   rows: QuestionRow[];
   /** Tab counts, computed over the questions matching the search. */
   counts: Record<QuestionFilter, number>;
-  /** Due questions in the whole folder (what 「N問を復習」 starts), independent of search / filter. */
+  /** Due questions in the whole folder, independent of search / filter. */
   dueCount: number;
+  /** Questions 「N問を復習」 starts: exactly the rows shown (search AND filter). */
+  reviewCount: number;
 };
 
 /** Use case: one folder's question management; `undefined` when the folder does not exist or was deleted. */
@@ -63,11 +65,13 @@ export function loadFolderDetail(
       .listByFolder(folderId, { query: options.query })
       .map((q) => toQuestionRow(q, stats[q.id], dueIds.has(q.id))),
   );
+  const shown = filterRows(rows, options.filter ?? 'all');
   return {
     folder,
-    rows: filterRows(rows, options.filter ?? 'all'),
+    rows: shown,
     counts: { all: rows.length, due: rows.filter((r) => r.isDue).length, weak: rows.filter(isWeak).length },
     dueCount: dueIds.size,
+    reviewCount: shown.length,
   };
 }
 

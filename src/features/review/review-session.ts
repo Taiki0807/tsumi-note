@@ -14,6 +14,8 @@ export type SessionItem = {
   prompt: string;
   answer: string;
   folderName: string;
+  /** Not due when the session started (「すべて」「苦手」): rating records history, keeps the FSRS schedule. */
+  voluntary?: boolean;
 };
 
 export type SessionOutcome = {
@@ -54,12 +56,14 @@ export type ReviewSessionState = { status: 'idle' } | ActiveSession | DoneSessio
 
 export const IDLE_SESSION: ReviewSessionState = { status: 'idle' };
 
-export function toSessionItems(due: DueQuestion[]): SessionItem[] {
-  return due.map(({ question, folderName }) => ({
+/** `at` given: questions not due at `at` become voluntary reviews (FSRS schedule untouched). */
+export function toSessionItems(due: DueQuestion[], at?: number): SessionItem[] {
+  return due.map(({ question, folderName, card }) => ({
     questionId: question.id,
     prompt: question.prompt,
     answer: question.answer,
     folderName,
+    voluntary: at !== undefined && card.dueAt > at,
   }));
 }
 

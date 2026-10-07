@@ -20,11 +20,13 @@ import {
   loadReviewOverview,
   loadReviewSettings,
   saveReviewSettings,
+  selectFolderViewItems,
   selectSessionItems,
   submitRating,
   type ReviewOverview,
 } from './review-use-cases';
 import type { ReviewSettings } from '@/domain/review-settings';
+import type { QuestionFilter } from '@/features/library/question-list';
 
 const TICK_MS = 250;
 
@@ -83,10 +85,13 @@ export function useReviewSession() {
   }, [timing, sync]);
 
   const start = useCallback(
-    (folderId?: string) => {
+    (folder?: { folderId: string; query?: string; filter?: QuestionFilter }) => {
       const at = Date.now();
       const settings = loadReviewSettings(repos);
-      const items = selectSessionItems(repos, settings, at, folderId);
+      // From a folder: exactly the questions shown there. Otherwise: the due questions.
+      const items = folder
+        ? selectFolderViewItems(repos, folder.folderId, folder, at)
+        : selectSessionItems(repos, settings, at);
       setError(null);
       setNow(at);
       setState(startSession(items, settings, at, randomUUID));

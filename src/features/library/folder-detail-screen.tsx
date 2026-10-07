@@ -281,12 +281,17 @@ export function FolderDetailScreen() {
         <Button flex label="復習設定" variant="secondary" onPress={() => router.push('/review/settings')} />
         <Button
           flex
-          label={`${detail.dueCount}問を復習`}
-          disabled={detail.dueCount === 0}
+          label={`${detail.reviewCount}問を復習`}
+          disabled={detail.reviewCount === 0}
           onPress={() =>
             router.navigate({
               pathname: '/(tabs)/review',
-              params: { folderId: detail.folder.id, run: String(Date.now()) },
+              params: {
+                folderId: detail.folder.id,
+                query: folder.query,
+                filter: folder.filter,
+                run: String(Date.now()),
+              },
             })
           }
         />

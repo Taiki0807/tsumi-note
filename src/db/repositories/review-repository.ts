@@ -1,4 +1,4 @@
-import { and, asc, count, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 
 import { newCardState, scheduleReview, type FsrsCardState, type ReviewRating } from '../../domain/fsrs';
 import { answerHistory, folders, fsrsStates, questions, reviewHistory } from '../schema';
@@ -25,10 +25,21 @@ export type ApplyRatingInput = {
   rating: ReviewRating;
   timedOut: boolean;
   elapsedMs: number | null;
+  /**
+   * Voluntary review of a question that was not due: history is appended but the FSRS state is
+   * left as is. PRODUCT_SPEC does not define this case, so the normal schedule is protected.
+   */
+  keepSchedule?: boolean;
 };
 
 export type ApplyRatingResult =
-  | { status: 'recorded'; card: FsrsCardState; reviewedAt: number }
+  | {
+      status: 'recorded';
+      card: FsrsCardState;
+      reviewedAt: number;
+      /** `false` for a question that was not due yet: history is stored, the schedule is untouched. */
+      scheduleUpdated: boolean;
+    }
   | { status: 'duplicate'; card: FsrsCardState | undefined }
   | { status: 'question-missing' };
 
@@ -99,6 +110,28 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
         .where(and(liveQuestion, lte(effectiveDue, at), inFolder(options.folderId)))
         .orderBy(asc(effectiveDue), asc(questions.createdAt), asc(questions.id))
         .limit(options.limit ?? -1)
+        .all();
+      return rows.map(({ question, state, folderName }) => ({
+        question,
+        folderName,
+        card: state ? rowToCard(state) : newCardState(question.createdAt),
+        isNew: state === null,
+      }));
+    },
+
+    /**
+     * The given live questions (due or not), ordered like `listDue`. Used for reviews whose
+     * targets are chosen on screen (folder filter + search).
+     */
+    listByIds(ids: string[]): DueQuestion[] {
+      if (ids.length === 0) return [];
+      const rows = db
+        .select({ question: questions, state: fsrsStates, folderName: folders.name })
+        .from(questions)
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .leftJoin(fsrsStates, eq(fsrsStates.questionId, questions.id))
+        .where(and(liveQuestion, inArray(questions.id, ids)))
+        .orderBy(asc(effectiveDue), asc(questions.createdAt), asc(questions.id))
         .all();
       return rows.map(({ question, state, folderName }) => ({
         question,
@@ -246,6 +279,9 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
             answeredAt: reviewedAt,
           })
           .run();
+        if (input.keepSchedule) {
+          return { status: 'recorded', card: before, reviewedAt, scheduleUpdated: false };
+        }
         tx.insert(fsrsStates)
           .values({ questionId: input.questionId, ...cardToColumns(next), updatedAt: reviewedAt })
           .onConflictDoUpdate({
@@ -254,7 +290,7 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
           })
           .run();
 
-        return { status: 'recorded', card: next, reviewedAt };
+        return { status: 'recorded', card: next, reviewedAt, scheduleUpdated: true };
       });
     },
   };

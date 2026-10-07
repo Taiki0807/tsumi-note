@@ -105,7 +105,7 @@ describe('review repository: rating', () => {
     const reviewedAt = 2_000;
     const result = repos.review.applyRating(attempt('r1', q.id, 'good'));
     const expected = scheduleReview(newCardState(q.createdAt), 'good', reviewedAt).next;
-    expect(result).toEqual({ status: 'recorded', card: expected, reviewedAt });
+    expect(result).toEqual({ status: 'recorded', card: expected, reviewedAt, scheduleUpdated: true });
     expect(repos.review.getState(q.id)).toEqual(expected);
   });
 

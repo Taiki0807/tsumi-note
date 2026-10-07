@@ -6,6 +6,8 @@ import {
   type ReviewSettings,
 } from '@/domain/review-settings';
 import type { ReviewRating } from '@/domain/fsrs';
+import { loadFolderDetail } from '@/features/library/library-use-cases';
+import type { QuestionFilter } from '@/features/library/question-list';
 
 import {
   makeOutcome,
@@ -71,6 +73,21 @@ export function selectSessionItems(
 }
 
 /**
+ * Use case: the questions currently shown in a folder's question management (search AND filter),
+ * due or not. Not capped by the session size, so it always matches the 「N問を復習」 count.
+ */
+export function selectFolderViewItems(
+  repos: ReviewRepos & Pick<Repositories, 'folders' | 'questions'>,
+  folderId: string,
+  view: { query?: string; filter?: QuestionFilter },
+  now: number,
+): SessionItem[] {
+  const detail = loadFolderDetail(repos, folderId, { ...view, now });
+  if (!detail) return [];
+  return toSessionItems(repos.review.listByIds(detail.rows.map((r) => r.question.id)), now);
+}
+
+/**
  * Use case: rate the current question. Persists FSRS state + history in one transaction and
  * returns the outcome to show in the summary, or `null` when the question no longer exists.
  */
@@ -87,6 +104,7 @@ export function submitRating(
     rating,
     timedOut: session.timedOut,
     elapsedMs: session.elapsedMs,
+    keepSchedule: item.voluntary,
   });
   if (result.status === 'question-missing') return null;
   // A duplicate means this attempt was already stored (double tap): reuse the stored schedule.
