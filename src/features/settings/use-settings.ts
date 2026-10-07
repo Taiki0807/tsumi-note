@@ -1,0 +1,84 @@
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { Appearance } from 'react-native';
+
+import { useRepositories } from '@/db/database-provider';
+import type { Goal } from '@/db/repositories';
+import type { ReminderSettings } from '@/domain/app-settings';
+import type { GoalInput } from '@/domain/goal';
+
+import { shareExport } from './export-data';
+import { reminderScheduler, type ReminderResult } from './reminder-notifications';
+import {
+  deleteGoal,
+  loadActiveGoal,
+  loadDarkMode,
+  loadMyPageSummary,
+  loadReminder,
+  restoreReminder,
+  saveDarkMode,
+  saveGoal,
+  saveReminder,
+  type MyPageSummary,
+} from './settings-use-cases';
+
+/** Mount once inside <DatabaseProvider>: applies the stored Light / Dark choice and restores the reminder. */
+export function useApplyStoredSettings(): void {
+  const repos = useRepositories();
+  useEffect(() => {
+    const dark = loadDarkMode(repos);
+    // 'unspecified' hands control back to the system; the existing useTheme/useColorScheme follows it.
+    Appearance.setColorScheme(dark === null ? 'unspecified' : dark ? 'dark' : 'light');
+    void restoreReminder(repos, reminderScheduler);
+  }, [repos]);
+}
+
+/** My page data, re-read whenever the tab regains focus (goal / settings are edited on other screens). */
+export function useMyPage() {
+  const repos = useRepositories();
+  const [summary, setSummary] = useState<MyPageSummary | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      setSummary(loadMyPageSummary(repos, Date.now()));
+    }, [repos]),
+  );
+
+  const setDarkMode = useCallback(
+    (dark: boolean) => {
+      saveDarkMode(repos, dark);
+      Appearance.setColorScheme(dark ? 'dark' : 'light');
+      setSummary((s) => (s ? { ...s, darkMode: dark } : s));
+    },
+    [repos],
+  );
+  return { summary, setDarkMode };
+}
+
+export function useGoal() {
+  const repos = useRepositories();
+  const [goal, setGoal] = useState<Goal | undefined>(() => loadActiveGoal(repos));
+  return {
+    goal,
+    save: (input: GoalInput) => setGoal(saveGoal(repos, input)),
+    remove: () => {
+      deleteGoal(repos);
+      setGoal(undefined);
+    },
+  };
+}
+
+export function useReminderSettings() {
+  const repos = useRepositories();
+  const [reminder, setReminder] = useState<ReminderSettings>(() => loadReminder(repos));
+  const update = async (next: ReminderSettings): Promise<ReminderResult> => {
+    const result = await saveReminder(repos, reminderScheduler, next);
+    setReminder(result.ok ? result.reminder : { ...next, enabled: false });
+    return result;
+  };
+  return { reminder, update };
+}
+
+export function useDataExport() {
+  const repos = useRepositories();
+  return () => shareExport(repos, Date.now());
+}

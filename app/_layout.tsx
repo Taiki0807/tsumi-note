@@ -17,12 +17,22 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SplashView } from '@/components/splash-view';
 import { DatabaseProvider } from '@/db/database-provider';
 import { useTheme } from '@/design';
+import { useApplyStoredSettings } from '@/features/settings/use-settings';
 
 // Keep the native splash until fonts are loaded, then hand over to <SplashView/> while the DB migrates.
 void SplashScreen.preventAutoHideAsync();
 
 /** Figma 00 起動画面 background; shown behind everything until the app body is mounted. */
 const SPLASH_BACKGROUND = '#6949ff';
+
+/** Needs the database: applies the stored Dark Mode choice before the screens use `useTheme`. */
+function AppStack() {
+  const colors = useTheme();
+  useApplyStoredSettings();
+  return (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
+  );
+}
 
 export default function RootLayout() {
   const colors = useTheme();
@@ -52,9 +62,7 @@ export default function RootLayout() {
             </Text>
           )}
         >
-          <Stack
-            screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}
-          />
+          <AppStack />
         </DatabaseProvider>
       </SafeAreaProvider>
     </View>
