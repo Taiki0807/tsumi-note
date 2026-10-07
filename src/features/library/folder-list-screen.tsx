@@ -1,10 +1,10 @@
 import { router } from 'expo-router';
-import { useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
-import { Button, EmptyState, IconButton, SearchField } from '@/components/form-ui';
+import { Button, EmptyState, SearchField } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 import { Chip } from '@/features/review/review-ui';
@@ -96,7 +96,6 @@ export function FolderListScreen({ header }: { header?: ReactNode } = {}) {
   const insets = useSafeAreaInsets();
   const { folders, totalQuestions, query, setQuery, createFolder } = useFolderList();
   const [creating, setCreating] = useState(false);
-  const searchRef = useRef<TextInput>(null);
   const searching = query.trim().length > 0;
 
   return (
@@ -123,7 +122,6 @@ export function FolderListScreen({ header }: { header?: ReactNode } = {}) {
         >
           フォルダー
         </Text>
-        <IconButton name="search" label="フォルダーを検索" onPress={() => searchRef.current?.focus()} />
       </View>
       <ScrollView
         contentContainerStyle={{
@@ -138,7 +136,6 @@ export function FolderListScreen({ header }: { header?: ReactNode } = {}) {
       >
         {header}
         <SearchField
-          inputRef={searchRef}
           value={query}
           onChangeText={setQuery}
           placeholder="フォルダーを検索"
