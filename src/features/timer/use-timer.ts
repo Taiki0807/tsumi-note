@@ -17,11 +17,7 @@ import {
   type TimerSettings,
   type TimerState,
 } from './timer-logic';
-import {
-  ensureNotificationPermission,
-  notifyHaptic,
-  syncTimerNotifications,
-} from './timer-notifications';
+import { ensureNotificationPermission, notifyHaptic, syncTimerNotifications } from './timer-notifications';
 import { createTimerStorage } from './timer-storage';
 
 /** Timer State / Hook: glues pure logic to storage, notifications and AppState. */
