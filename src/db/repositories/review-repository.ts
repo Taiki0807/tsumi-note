@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 
 import {
   newCardState,
@@ -224,6 +224,31 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
           { attempts: r.attempts, incorrect: Number(r.incorrect), timeouts: Number(r.timeouts) },
         ]),
       );
+    },
+
+    /**
+     * Answer History results with `answeredAt` in [fromInclusive, toExclusive), live questions
+     * only; `folderId` omitted = all folders. Feeds the 学習記録 「今週の理解度」.
+     */
+    listAnswersBetween(
+      fromInclusive: number,
+      toExclusive: number,
+      folderId?: string,
+    ): { result: 'correct' | 'incorrect' | 'timeout'; answeredAt: number }[] {
+      return db
+        .select({ result: answerHistory.result, answeredAt: answerHistory.answeredAt })
+        .from(answerHistory)
+        .innerJoin(questions, eq(questions.id, answerHistory.questionId))
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .where(
+          and(
+            liveQuestion,
+            gte(answerHistory.answeredAt, fromInclusive),
+            lt(answerHistory.answeredAt, toExclusive),
+            inFolder(folderId),
+          ),
+        )
+        .all();
     },
 
     /** Live questions regardless of schedule: tells "no questions at all" from "nothing due now". */

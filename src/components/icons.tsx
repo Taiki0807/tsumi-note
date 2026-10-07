@@ -5,6 +5,7 @@ export type IconName =
   | 'note'
   | 'clock'
   | 'check'
+  | 'target'
   | 'cards'
   | 'user'
   | 'settings'
@@ -63,6 +64,12 @@ export function Icon({ name, size, color, strokeWidth = 2, handsColor }: Props) 
         <>
           <Circle cx={12} cy={12} r={9} {...common} />
           <Path d="M12 7v5l3 2" {...common} stroke={handsColor ?? color} />
+        </>
+      )}
+      {name === 'target' && (
+        <>
+          <Circle cx={12} cy={12} r={9} {...common} />
+          <Circle cx={12} cy={12} r={4.5} {...common} />
         </>
       )}
       {name === 'check' && <Path d="M5 12.5l4.5 4.5L19 7.5" {...common} />}
