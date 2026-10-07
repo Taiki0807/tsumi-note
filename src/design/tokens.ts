@@ -12,6 +12,7 @@ const palette = {
   white: '#ffffff',
   charcoal900: '#212121',
   charcoal700: '#616161',
+  gray400: '#9e9e9e',
   gray300: '#e0e0e0',
   gray200: '#eeeeee',
   gray100: '#f5f5f7',
@@ -40,6 +41,8 @@ export type ThemeColors = {
   surfaceMuted: string;
   textPrimary: string;
   textSecondary: string;
+  /** Figma Input placeholder (#9e9e9e). */
+  textPlaceholder: string;
   textOnPrimary: string;
   border: string;
   divider: string;
@@ -66,6 +69,7 @@ export const lightColors: ThemeColors = {
   surfaceMuted: palette.gray100,
   textPrimary: palette.charcoal900,
   textSecondary: palette.charcoal700,
+  textPlaceholder: palette.gray400,
   textOnPrimary: palette.white,
   border: palette.gray300,
   divider: palette.gray200,

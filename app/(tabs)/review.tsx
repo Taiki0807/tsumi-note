@@ -1,5 +1,4 @@
-import { PlaceholderScreen } from '@/components/placeholder-screen';
+import { FolderListScreen } from '@/features/library/folder-list-screen';
 
-export default function ReviewScreen() {
-  return <PlaceholderScreen title="復習" phase={5} />;
-}
+// Figma 07 shows the folder list under the 復習 tab. The review session itself arrives in Phase 5.
+export default FolderListScreen;

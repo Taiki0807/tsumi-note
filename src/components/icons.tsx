@@ -12,7 +12,11 @@ export type IconName =
   | 'chevron-right'
   | 'more'
   | 'arrow-up'
-  | 'arrow-down';
+  | 'arrow-down'
+  | 'arrow-left'
+  | 'plus'
+  | 'close'
+  | 'folder';
 
 type Props = {
   name: IconName;
@@ -78,6 +82,12 @@ export function Icon({ name, size, color, strokeWidth = 2, handsColor }: Props) 
       )}
       {name === 'chevron-left' && <Path d="M15 5l-7 7 7 7" {...common} />}
       {name === 'chevron-right' && <Path d="M9 5l7 7-7 7" {...common} />}
+      {name === 'arrow-left' && <Path d="M19 12H5M11 6l-6 6 6 6" {...common} />}
+      {name === 'plus' && <Path d="M12 5v14M5 12h14" {...common} />}
+      {name === 'close' && <Path d="M6 6l12 12M18 6L6 18" {...common} />}
+      {name === 'folder' && (
+        <Path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" {...common} />
+      )}
       {name === 'arrow-up' && <Path d="M12 19V5M6 11l6-6 6 6" {...common} />}
       {name === 'arrow-down' && <Path d="M12 5v14M6 13l6 6 6-6" {...common} />}
       {name === 'more' && (
