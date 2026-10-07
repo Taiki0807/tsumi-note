@@ -2,7 +2,9 @@ import { createRepositories } from '@/db/repositories';
 import { createTestDeps } from '@/db/test-utils';
 import { loadFolderDetail } from '@/features/library/library-use-cases';
 
-import { selectFolderViewItems } from './review-use-cases';
+import { DEFAULT_REVIEW_SETTINGS } from '@/domain/review-settings';
+
+import { loadReviewSettings, saveReviewSettings, selectFolderViewItems } from './review-use-cases';
 
 const NOW = 1_000;
 
@@ -38,7 +40,9 @@ function seed() {
 type Seed = ReturnType<typeof seed>;
 
 const names = (s: Seed, view: { query?: string; filter?: 'all' | 'due' | 'weak' }) =>
-  selectFolderViewItems(s.repos, s.folder.id, view, NOW).map((i) => i.prompt).sort();
+  selectFolderViewItems(s.repos, s.folder.id, view, NOW)
+    .map((i) => i.prompt)
+    .sort();
 const buttonCount = (s: Seed, view: { query?: string; filter?: 'all' | 'due' | 'weak' }) =>
   loadFolderDetail(s.repos, s.folder.id, { ...view, now: NOW })!.reviewCount;
 
@@ -96,6 +100,66 @@ describe('folder review follows the question list', () => {
     expect(buttonCount(s, { filter: 'all' })).toBe(2);
     s.repos.folders.softDelete(s.folder.id);
     expect(names(s, { filter: 'all' })).toEqual([]);
+  });
+});
+
+describe('folder review respects the saved session size', () => {
+  function seedMany(total: number, size: number | 'all') {
+    const { deps } = createTestDeps();
+    const repos = createRepositories(deps);
+    const folder = repos.folders.create({ name: 'f' });
+    for (let i = 0; i < total; i++) {
+      repos.questions.create({ folderId: folder.id, prompt: `q${i}`, answer: `a${i}` });
+    }
+    saveReviewSettings(repos, { ...DEFAULT_REVIEW_SETTINGS, sessionSize: size });
+    return { repos, folder };
+  }
+  type Many = ReturnType<typeof seedMany>;
+  type View = { query?: string; filter?: 'all' | 'due' | 'weak' };
+  const started = (s: Many, view: View = {}) => selectFolderViewItems(s.repos, s.folder.id, view, NOW).length;
+  const button = (s: Many, view: View = {}) => {
+    const { sessionSize } = loadReviewSettings(s.repos);
+    return loadFolderDetail(s.repos, s.folder.id, {
+      ...view,
+      now: NOW,
+      sessionLimit: sessionSize === 'all' ? undefined : sessionSize,
+    })!.reviewCount;
+  };
+
+  it.each([
+    [3, 10, 3],
+    [10, 10, 10],
+    [11, 10, 10],
+    [30, 10, 10],
+    [30, 'all' as const, 30],
+  ])('対象%i問 / sessionSize %s -> %i問 (button matches)', (total, size, expected) => {
+    const s = seedMany(total, size);
+    expect(started(s)).toBe(expected);
+    expect(button(s)).toBe(expected);
+  });
+
+  it('applies to search and to each filter', () => {
+    const s = seedMany(30, 10);
+    const views: View[] = [
+      { query: 'q' },
+      { query: 'q1' },
+      { filter: 'due' },
+      { filter: 'all' },
+      { filter: 'weak' },
+    ];
+    for (const view of views) expect(started(s, view)).toBe(button(s, view));
+    expect(started(s, { query: 'q1' })).toBe(10);
+    expect(started(s, { query: 'q29' })).toBe(1);
+    expect(started(s, { filter: 'weak' })).toBe(0);
+  });
+
+  it('excludes deleted questions before capping', () => {
+    const s = seedMany(11, 10);
+    s.repos.questions.softDelete(s.repos.questions.listByFolder(s.folder.id)[0]!.id);
+    expect(started(s)).toBe(10);
+    s.repos.questions.softDelete(s.repos.questions.listByFolder(s.folder.id)[0]!.id);
+    expect(started(s)).toBe(9);
+    expect(button(s)).toBe(9);
   });
 });
 

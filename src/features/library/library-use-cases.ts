@@ -46,7 +46,7 @@ export type FolderDetail = {
   counts: Record<QuestionFilter, number>;
   /** Due questions in the whole folder, independent of search / filter. */
   dueCount: number;
-  /** Questions 「N問を復習」 starts: exactly the rows shown (search AND filter). */
+  /** Questions 「N問を復習」 starts: the rows shown (search AND filter), capped by `sessionLimit`. */
   reviewCount: number;
 };
 
@@ -54,7 +54,7 @@ export type FolderDetail = {
 export function loadFolderDetail(
   { folders, questions, review }: LibraryReviewRepos,
   folderId: string,
-  options: { query?: string; filter?: QuestionFilter; now?: number } = {},
+  options: { query?: string; filter?: QuestionFilter; now?: number; sessionLimit?: number } = {},
 ): FolderDetail | undefined {
   const folder = folders.getById(folderId);
   if (!folder) return undefined;
@@ -71,7 +71,8 @@ export function loadFolderDetail(
     rows: shown,
     counts: { all: rows.length, due: rows.filter((r) => r.isDue).length, weak: rows.filter(isWeak).length },
     dueCount: dueIds.size,
-    reviewCount: shown.length,
+    reviewCount:
+      options.sessionLimit === undefined ? shown.length : Math.min(shown.length, options.sessionLimit),
   };
 }
 

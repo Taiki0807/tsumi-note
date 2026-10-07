@@ -75,7 +75,8 @@ export function selectSessionItems(
 
 /**
  * Use case: the questions currently shown in a folder's question management (search AND filter),
- * due or not. Not capped by the session size, so it always matches the 「N問を復習」 count.
+ * due or not, then capped by the saved session size. `loadFolderDetail` applies the same cap, so
+ * the 「N問を復習」 count equals the number of items returned here.
  */
 export function selectFolderViewItems(
   repos: ReviewRepos & Pick<Repositories, 'folders' | 'questions'>,
@@ -83,13 +84,16 @@ export function selectFolderViewItems(
   view: { query?: string; filter?: QuestionFilter },
   now: number,
 ): SessionItem[] {
-  const detail = loadFolderDetail(repos, folderId, { ...view, now });
+  const { sessionSize } = loadReviewSettings(repos);
+  const sessionLimit = sessionSize === 'all' ? undefined : sessionSize;
+  const detail = loadFolderDetail(repos, folderId, { ...view, now, sessionLimit });
   if (!detail) return [];
-  return toSessionItems(repos.review.listByIds(detail.rows.map((r) => r.question.id)), now);
+  const items = toSessionItems(repos.review.listByIds(detail.rows.map((r) => r.question.id)), now);
+  return sessionLimit === undefined ? items : items.slice(0, sessionLimit);
 }
 
 export type RatingPreview = {
-  /** The time the candidates were computed at; pass it to `submitRating` as `reviewedAt`. */
+  /** The time the candidates were computed at (display only; not used when saving). */
   at: number;
   /** Time until the next due for each rating, e.g. "10分". */
   intervals: Record<ReviewRating, string>;
@@ -115,14 +119,15 @@ export function previewRatings(repos: ReviewRepos, session: ActiveSession, at: n
 /**
  * Use case: rate the current question. Persists FSRS state + history in one transaction and
  * returns the outcome to show in the summary, or `null` when the question no longer exists.
- * `reviewedAt` = the preview time, so the stored due matches what the button showed.
+ * `now` is the moment the user tapped the rating: it is the stored `reviewedAt` and the base of
+ * the FSRS schedule (same `scheduleReview` as the preview, but evaluated at the real time).
+ * The shown preview may be slightly stale after a long wait; the stored value is the accurate one.
  */
 export function submitRating(
   repos: ReviewRepos,
   session: ActiveSession,
   rating: ReviewRating,
   now: number,
-  reviewedAt?: number,
 ): SessionOutcome | null {
   const item = session.items[session.index]!;
   const result = repos.review.applyRating({
@@ -132,7 +137,7 @@ export function submitRating(
     timedOut: session.timedOut,
     elapsedMs: session.elapsedMs,
     keepSchedule: item.voluntary,
-    reviewedAt,
+    reviewedAt: now,
   });
   if (result.status === 'question-missing') return null;
   // A duplicate means this attempt was already stored (double tap): reuse the stored schedule.

@@ -113,20 +113,43 @@ describe('rating preview', () => {
     expect(repos.review.countDue(10_000)).toBe(1);
   });
 
-  it.each(REVIEW_RATINGS)('stores exactly the previewed due when %s is chosen', (rating) => {
+  it.each(REVIEW_RATINGS)('rating right after the answer shows stores the previewed due (%s)', (rating) => {
     const { repos, tick, question } = setup();
     tick();
     const session = answerSession(repos, 5_000);
     const preview = previewRatings(repos, session, 6_000)!;
-    const previewedDue = repos.review.previewRatings(question.id, preview.at)![rating].dueAt;
+    const previewedDue = repos.review.previewRatings(question.id, 6_000)![rating].dueAt;
 
-    tick(30_000); // time passes between showing the buttons and tapping
-    const outcome = submitRating(repos, session, rating, 40_000, preview.at)!;
+    const outcome = submitRating(repos, session, rating, 6_000)!;
 
     expect(repos.review.getState(question.id)!.dueAt).toBe(previewedDue);
     expect(outcome.nextDueAt).toBe(previewedDue);
-    expect(formatInterval(previewedDue - preview.at)).toBe(preview.intervals[rating]);
+    expect(formatInterval(previewedDue - 6_000)).toBe(preview.intervals[rating]);
     expect(repos.review.listHistory(question.id)).toHaveLength(1);
+  });
+
+  it.each([
+    ['30秒後', 30_000],
+    ['バックグラウンド相当の3時間後', 3 * HOUR],
+  ])('uses the real tap time as reviewedAt and the FSRS base (%s)', (_label, wait) => {
+    const { repos, tick, question } = setup();
+    tick();
+    const shownAt = 6_000;
+    const session = answerSession(repos, 5_000);
+    const preview = previewRatings(repos, session, shownAt)!;
+    const tappedAt = shownAt + wait;
+
+    const expectedDue = previewReviews(repos.review.listDue({ at: shownAt })[0]!.card, tappedAt).good.next
+      .dueAt;
+
+    submitRating(repos, session, 'good', tappedAt);
+
+    const [entry] = repos.review.listHistory(question.id);
+    expect(entry!.reviewedAt).toBe(tappedAt);
+    expect(entry!.reviewedAt).not.toBe(preview.at);
+    // due = FSRS result computed at the tap time (same scheduler as the preview).
+    expect(repos.review.getState(question.id)!.dueAt).toBe(expectedDue);
+    expect(repos.review.getState(question.id)!.dueAt).toBeGreaterThan(tappedAt);
   });
 
   it('shows no intervals for a voluntary (not due) review whose schedule is kept', () => {

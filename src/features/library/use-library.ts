@@ -2,6 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 
 import { useRepositories } from '@/db/database-provider';
+import { parseReviewSettings } from '@/domain/review-settings';
 
 import {
   describeFolderDeletion,
@@ -53,7 +54,15 @@ export function useFolderDetail(folderId: string) {
   const [filter, setFilter] = useState<QuestionFilter>('all');
 
   const detail: FolderDetail | undefined = useMemo(
-    () => loadFolderDetail(repos, folderId, { query, filter }),
+    () => {
+      // The saved session size caps 「N問を復習」 (same value `selectFolderViewItems` uses).
+      const { sessionSize } = parseReviewSettings((key) => repos.settings.get(key));
+      return loadFolderDetail(repos, folderId, {
+        query,
+        filter,
+        sessionLimit: sessionSize === 'all' ? undefined : sessionSize,
+      });
+    },
     // `revision` forces a re-read after focus / writes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [repos, folderId, query, filter, revision],

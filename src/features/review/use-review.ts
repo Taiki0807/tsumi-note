@@ -62,7 +62,7 @@ export function useReviewSession() {
 
   /**
    * Next-review candidates of the current question, computed once when its answer appears
-   * (read-only; nothing is saved). `previewRef` keeps the same value for `rate`.
+   * (read-only; nothing is saved). Display only: `rate` saves with the real tap time.
    */
   const [preview, setPreview] = useState<RatingPreview | null>(null);
   const previewRef = useRef<RatingPreview | null>(null);
@@ -132,7 +132,7 @@ export function useReviewSession() {
       setSaving(true);
       try {
         const at = Date.now();
-        const outcome = submitRating(repos, current, rating, at, previewRef.current?.at);
+        const outcome = submitRating(repos, current, rating, at);
         setError(null);
         setNow(at);
         setState(advance(current, outcome, at, randomUUID));
