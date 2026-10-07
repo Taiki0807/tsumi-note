@@ -20,6 +20,7 @@
       "expo-router",
       "expo-font",
       "expo-sqlite",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {
