@@ -94,7 +94,7 @@ describe('study session repository (append-only)', () => {
 
   it('does not expose update or delete', () => {
     const { repos } = setup();
-    expect(Object.keys(repos.studySessions).sort()).toEqual(['listSince', 'record']);
+    expect(Object.keys(repos.studySessions).sort()).toEqual(['listBetween', 'listSince', 'record']);
   });
 });
 
