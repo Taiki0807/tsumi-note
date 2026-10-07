@@ -1,7 +1,8 @@
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 
-import { planBoundaries, type TimerEvent, type TimerState } from './timer-logic';
+import type { TimerEvent, TimerState } from './timer-logic';
+import { createNotificationSynchronizer } from './timer-notification-sync';
 
 const MESSAGES: Record<TimerEvent, { title: string; body: string }> = {
   focusEnd: { title: '集中時間が終了しました', body: '休憩しましょう。' },
@@ -31,30 +32,20 @@ export async function ensureNotificationPermission(): Promise<boolean> {
   }
 }
 
-export async function cancelTimerNotifications(): Promise<void> {
-  try {
-    await Notifications.cancelAllScheduledNotificationsAsync();
-  } catch {
-    // Notifications are best-effort.
-  }
-}
+const synchronizer = createNotificationSynchronizer({
+  cancelAll: () => Notifications.cancelAllScheduledNotificationsAsync(),
+  hasPermission: async () => (await Notifications.getPermissionsAsync()).granted,
+  schedule: async (at, event) => {
+    await Notifications.scheduleNotificationAsync({
+      content: { ...MESSAGES[event], sound: true },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(at) },
+    });
+  },
+});
 
-/** Replaces all scheduled notifications with the future boundaries of the running timer. */
-export async function scheduleTimerNotifications(state: TimerState, now: number): Promise<void> {
-  await cancelTimerNotifications();
-  try {
-    const granted = (await Notifications.getPermissionsAsync()).granted;
-    if (!granted) return;
-    for (const { at, event } of planBoundaries(state)) {
-      if (at <= now) continue;
-      await Notifications.scheduleNotificationAsync({
-        content: { ...MESSAGES[event], sound: true },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(at) },
-      });
-    }
-  } catch {
-    // Notifications are best-effort.
-  }
+/** Single entry point: makes scheduled notifications match `state` (none unless running). The latest state wins. */
+export function syncTimerNotifications(state: TimerState, now: number): Promise<void> {
+  return synchronizer.sync(state, now);
 }
 
 export function notifyHaptic(event: TimerEvent): void {

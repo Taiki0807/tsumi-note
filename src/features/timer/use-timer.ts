@@ -17,10 +17,9 @@ import {
   type TimerState,
 } from './timer-logic';
 import {
-  cancelTimerNotifications,
   ensureNotificationPermission,
   notifyHaptic,
-  scheduleTimerNotifications,
+  syncTimerNotifications,
 } from './timer-notifications';
 import { createTimerStorage } from './timer-storage';
 
@@ -44,8 +43,7 @@ export function useTimer() {
       setState(next);
       setNow(at);
       storage.saveState(next);
-      if (next.status === 'running') void scheduleTimerNotifications(next, at);
-      else void cancelTimerNotifications();
+      void syncTimerNotifications(next, at);
     },
     [storage],
   );
