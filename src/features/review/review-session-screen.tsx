@@ -134,6 +134,19 @@ function TimeRemaining({ session, state }: { session: Session; state: ActiveSess
   );
 }
 
+/**
+ * Figma 10 › Question bottom stroke: 1.5pt dashed (6/4) line in the border colour, full width.
+ * Only the top edge of a dashed box is shown, because RN has no per-side dashed borders.
+ * Sits 20pt below the prompt (10 flex gap + 10 margin). RN picks the dash length itself, so 6/4 is approximated.
+ */
+function DashedDivider({ color }: { color: string }) {
+  return (
+    <View style={{ alignSelf: 'stretch', height: 1.5, marginTop: 10, overflow: 'hidden' }}>
+      <View style={{ height: 6, borderWidth: 1.5, borderStyle: 'dashed', borderColor: color }} />
+    </View>
+  );
+}
+
 /** Figma 10 › Flashcard: 問題 chip + prompt, then 答え chip + answer once revealed. */
 function Flashcard({ state }: { state: ActiveSession }) {
   const colors = useTheme();
@@ -150,8 +163,8 @@ function Flashcard({ state }: { state: ActiveSession }) {
         backgroundColor: colors.surface,
       }}
     >
-      <View style={{ alignItems: 'center', gap: 10, paddingBottom: state.step === 'answer' ? 20 : 0 }}>
-        <Chip label="問題" icon="check" background={colors.primarySoft} color={colors.primary} />
+      <View style={{ alignItems: 'center', gap: 10 }}>
+        <Chip label="問題" background={colors.primarySoft} color={colors.primary} />
         <Text
           accessibilityLabel={`問題: ${item.prompt}`}
           style={{
@@ -164,16 +177,11 @@ function Flashcard({ state }: { state: ActiveSession }) {
         >
           {item.prompt}
         </Text>
+        {state.step === 'answer' ? <DashedDivider color={colors.border} /> : null}
       </View>
       {state.step === 'answer' ? (
         <View style={{ alignItems: 'center', gap: 8, paddingTop: 4 }}>
-          <Chip
-            label="答え"
-            icon="check"
-            background={colors.successSoft}
-            color={colors.successText}
-            iconColor={colors.success}
-          />
+          <Chip label="答え" background={colors.successSoft} color={colors.successText} />
           <Text
             accessibilityLabel={`答え: ${item.answer}`}
             style={{
