@@ -1,3 +1,4 @@
+import { studySessions } from '../schema';
 import { createTestDeps } from '../test-utils';
 import { createRepositories } from './index';
 
@@ -56,6 +57,34 @@ describe('study session repository (append-only)', () => {
     });
     expect(session.durationSeconds).toBe(1_500);
     expect(repos.studySessions.listSince(0)).toHaveLength(1);
+  });
+
+  it('is idempotent for the same id (primary key) and keeps the first record', () => {
+    const { repos } = setup();
+    const first = repos.studySessions.record({ id: 's1', folderId: null, startedAt: 0, endedAt: 60_000 });
+    const second = repos.studySessions.record({ id: 's1', folderId: null, startedAt: 5, endedAt: 90_000 });
+    expect(repos.studySessions.listSince(0)).toHaveLength(1);
+    expect(second).toEqual(first);
+  });
+
+  it('enforces the primary key in SQLite itself: a plain duplicate INSERT is rejected', () => {
+    const { deps } = createTestDeps();
+    const row = { id: 's1', folderId: null, startedAt: 0, endedAt: 1_000, durationSeconds: 1, createdAt: 1 };
+    deps.db.insert(studySessions).values(row).run();
+    expect(() => deps.db.insert(studySessions).values(row).run()).toThrow(/UNIQUE|PRIMARY/i);
+    expect(deps.db.select().from(studySessions).all()).toHaveLength(1);
+  });
+
+  it('stores an explicit duration independent of startedAt / endedAt', () => {
+    const { repos } = setup();
+    const s = repos.studySessions.record({
+      id: 's2',
+      folderId: null,
+      startedAt: 0,
+      endedAt: 3_300_000,
+      durationSeconds: 1_500,
+    });
+    expect(s.durationSeconds).toBe(1_500);
   });
 
   it('rejects sessions for unknown folders (foreign keys enforced)', () => {

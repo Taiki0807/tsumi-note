@@ -22,7 +22,7 @@ export function PlaceholderScreen({ title, phase }: Props) {
         </Text>
       </View>
       <View className="flex-1 items-center justify-center px-6">
-        <Text className="text-body-sm font-bold" style={{ color: colors.textSecondary }}>
+        <Text className="font-bold text-body-sm" style={{ color: colors.textSecondary }}>
           Phase {phase} で実装予定
         </Text>
       </View>
