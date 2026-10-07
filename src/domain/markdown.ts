@@ -6,9 +6,8 @@
 
 export type InlineNode =
   | { type: 'text'; text: string }
-  | { type: 'bold'; text: string }
-  | { type: 'italic'; text: string }
-  | { type: 'strike'; text: string }
+  /** Any combination of bold / italic / strikethrough, so `***a***` is a single node. */
+  | { type: 'styled'; text: string; bold: boolean; italic: boolean; strike: boolean }
   | { type: 'code'; text: string }
   | { type: 'link'; text: string; url: string };
 
@@ -24,30 +23,50 @@ export type MarkdownBlock =
   /** `ref` is the raw URL / `note-image://` reference from the Markdown. */
   | { type: 'image'; alt: string; ref: string };
 
+/**
+ * Tried in order at each position: link, code (both atomic), `***`, `**`, `~~`, `*`.
+ * Emphasis content is parsed again, so nested / combined markers (`**a *b***`, `~~**c**~~`) work —
+ * the same shapes the toolbar writes (see `toggleInline`). A `*` only closes when it is not part
+ * of a longer `*` run, which keeps `**` from being read as two italics.
+ */
 const INLINE_PATTERN =
-  /\[([^\]\n]+)\]\(([^)\s]+)\)|`([^`\n]+)`|\*\*([^*\n]+)\*\*|~~([^~\n]+)~~|\*([^*\n]+)\*/g;
+  /\[([^\]\n]+)\]\(([^)\s]+)\)|`([^`\n]+)`|\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*(?!\*)|~~(.+?)~~|\*(?!\*)((?:[^*\n]|\*\*.+?\*\*)+)\*(?!\*)/g;
 
-export function parseInline(source: string): InlineNode[] {
+type InlineStyle = { bold: boolean; italic: boolean; strike: boolean };
+
+function textNode(text: string, style: InlineStyle): InlineNode {
+  return style.bold || style.italic || style.strike
+    ? { type: 'styled', text, ...style }
+    : { type: 'text', text };
+}
+
+function parseStyled(source: string, style: InlineStyle): InlineNode[] {
   const nodes: InlineNode[] = [];
   let last = 0;
   for (const match of source.matchAll(INLINE_PATTERN)) {
     const index = match.index ?? 0;
-    if (index > last) nodes.push({ type: 'text', text: source.slice(last, index) });
+    if (index > last) nodes.push(textNode(source.slice(last, index), style));
     if (match[1] !== undefined && match[2] !== undefined) {
       nodes.push({ type: 'link', text: match[1], url: match[2] });
     } else if (match[3] !== undefined) {
       nodes.push({ type: 'code', text: match[3] });
     } else if (match[4] !== undefined) {
-      nodes.push({ type: 'bold', text: match[4] });
+      nodes.push(...parseStyled(match[4], { ...style, bold: true, italic: true }));
     } else if (match[5] !== undefined) {
-      nodes.push({ type: 'strike', text: match[5] });
+      nodes.push(...parseStyled(match[5], { ...style, bold: true }));
     } else if (match[6] !== undefined) {
-      nodes.push({ type: 'italic', text: match[6] });
+      nodes.push(...parseStyled(match[6], { ...style, strike: true }));
+    } else if (match[7] !== undefined) {
+      nodes.push(...parseStyled(match[7], { ...style, italic: true }));
     }
     last = index + match[0].length;
   }
-  if (last < source.length) nodes.push({ type: 'text', text: source.slice(last) });
+  if (last < source.length) nodes.push(textNode(source.slice(last), style));
   return nodes;
+}
+
+export function parseInline(source: string): InlineNode[] {
+  return parseStyled(source, { bold: false, italic: false, strike: false });
 }
 
 const CHECK = /^\s*[-*+]\s+\[([ xX])\]\s?(.*)$/;

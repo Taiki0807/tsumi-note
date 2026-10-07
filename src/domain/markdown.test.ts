@@ -74,9 +74,63 @@ describe('parseMarkdown', () => {
       { type: 'text', text: ' ' },
       { type: 'code', text: 'c' },
       { type: 'text', text: ' ' },
-      { type: 'bold', text: 'd' },
+      { type: 'styled', text: 'd', bold: true, italic: false, strike: false },
       { type: 'text', text: ' e' },
     ]);
+  });
+
+  describe('combined / nested emphasis', () => {
+    const s = (text: string, f: { bold?: boolean; italic?: boolean; strike?: boolean }) => ({
+      type: 'styled' as const,
+      text,
+      bold: f.bold ?? false,
+      italic: f.italic ?? false,
+      strike: f.strike ?? false,
+    });
+
+    it('parses each single style', () => {
+      expect(parseInline('*italic*')).toEqual([s('italic', { italic: true })]);
+      expect(parseInline('**bold**')).toEqual([s('bold', { bold: true })]);
+      expect(parseInline('~~strike~~')).toEqual([s('strike', { strike: true })]);
+    });
+
+    it('parses ***text*** as bold + italic without leftover asterisks', () => {
+      const nodes = parseInline('***text***');
+      expect(nodes).toEqual([s('text', { bold: true, italic: true })]);
+      expect(JSON.stringify(nodes)).not.toContain('*');
+    });
+
+    it('parses bold containing italic and italic containing bold', () => {
+      expect(parseInline('**bold and *italic***')).toEqual([
+        s('bold and ', { bold: true }),
+        s('italic', { bold: true, italic: true }),
+      ]);
+      expect(parseInline('*italic and **bold***')).toEqual([
+        s('italic and ', { italic: true }),
+        s('bold', { bold: true, italic: true }),
+      ]);
+    });
+
+    it('combines strikethrough with other styles', () => {
+      expect(parseInline('~~**a**~~')).toEqual([s('a', { bold: true, strike: true })]);
+    });
+
+    it('keeps links, code and plain text intact next to emphasis', () => {
+      expect(parseInline('***a*** `**x**` [l](https://x.y) 2*3')).toEqual([
+        s('a', { bold: true, italic: true }),
+        { type: 'text', text: ' ' },
+        { type: 'code', text: '**x**' },
+        { type: 'text', text: ' ' },
+        { type: 'link', text: 'l', url: 'https://x.y' },
+        { type: 'text', text: ' 2*3' },
+      ]);
+    });
+
+    it('keeps images as their own block', () => {
+      expect(parseMarkdown('![](note-image://a.png)')).toEqual([
+        { type: 'image', alt: '', ref: 'note-image://a.png' },
+      ]);
+    });
   });
 });
 

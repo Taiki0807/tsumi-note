@@ -14,21 +14,18 @@ function Inline({ nodes }: { nodes: InlineNode[] }) {
     <>
       {nodes.map((node, i) => {
         switch (node.type) {
-          case 'bold':
+          case 'styled':
             return (
-              <Text key={i} style={{ fontFamily: fontFamily.extraBold }}>
-                {node.text}
-              </Text>
-            );
-          case 'italic':
-            return (
-              <Text key={i} style={{ fontStyle: 'italic' }}>
-                {node.text}
-              </Text>
-            );
-          case 'strike':
-            return (
-              <Text key={i} style={{ textDecorationLine: 'line-through', color: colors.textSecondary }}>
+              <Text
+                key={i}
+                style={{
+                  ...(node.bold ? { fontFamily: fontFamily.extraBold } : {}),
+                  ...(node.italic ? { fontStyle: 'italic' as const } : {}),
+                  ...(node.strike
+                    ? { textDecorationLine: 'line-through' as const, color: colors.textSecondary }
+                    : {}),
+                }}
+              >
                 {node.text}
               </Text>
             );

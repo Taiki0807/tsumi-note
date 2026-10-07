@@ -51,12 +51,23 @@ describe('toggleInline (selection → Markdown)', () => {
 
   it('round-trips through the parser', () => {
     expect(parseInline('**a** *b* ~~c~~')).toEqual([
-      { type: 'bold', text: 'a' },
+      { type: 'styled', text: 'a', bold: true, italic: false, strike: false },
       { type: 'text', text: ' ' },
-      { type: 'italic', text: 'b' },
+      { type: 'styled', text: 'b', bold: false, italic: true, strike: false },
       { type: 'text', text: ' ' },
-      { type: 'strike', text: 'c' },
+      { type: 'styled', text: 'c', bold: false, italic: false, strike: true },
     ]);
+  });
+
+  it('previews toolbar output for Italic → Bold and Bold → Italic as bold + italic', () => {
+    const both = [{ type: 'styled', text: 'text', bold: true, italic: true, strike: false }];
+    const italicFirst = toggleInline(toggleInline('text', sel(0, 4), '*').text, sel(1, 5), '**');
+    expect(italicFirst.text).toBe('***text***');
+    expect(parseInline(italicFirst.text)).toEqual(both);
+
+    const boldFirst = toggleInline(toggleInline('text', sel(0, 4), '**').text, sel(2, 6), '*');
+    expect(boldFirst.text).toBe('***text***');
+    expect(parseInline(boldFirst.text)).toEqual(both);
   });
 });
 
