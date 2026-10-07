@@ -14,13 +14,33 @@ const KEYS = {
   breakMinutes: 'timer.breakMinutes',
   rounds: 'timer.rounds',
   state: 'timer.state',
+  folderId: 'timer.folderId',
 } as const;
 
-type TimerRepos = Pick<Repositories, 'settings' | 'studySessions'>;
+type TimerRepos = Pick<Repositories, 'settings' | 'studySessions' | 'folders'>;
 
 /** Repository-backed persistence for the timer. Fully local; no network involved. */
-export function createTimerStorage({ settings, studySessions }: TimerRepos) {
+export function createTimerStorage({ settings, studySessions, folders }: TimerRepos) {
   return {
+    /** Live (not deleted) folders, the only candidates for the picker. */
+    listFolders(): { id: string; name: string }[] {
+      return folders.list().map(({ id, name }) => ({ id, name }));
+    },
+
+    /**
+     * Folder for the NEXT run (the picker value). Unselected / deleted / unknown → null
+     * (未分類), so a stale id can never be attached to a new session.
+     */
+    loadSelectedFolderId(): string | null {
+      const id = settings.get(KEYS.folderId);
+      if (!id) return null;
+      return folders.list().some((f) => f.id === id) ? id : null;
+    },
+
+    saveSelectedFolderId(folderId: string | null): void {
+      settings.set(KEYS.folderId, folderId ?? '');
+    },
+
     loadSettings(): TimerSettings {
       const read = (key: keyof TimerSettings) => {
         const raw = settings.get(KEYS[key]);
@@ -51,14 +71,15 @@ export function createTimerStorage({ settings, studySessions }: TimerRepos) {
     },
 
     /**
-     * Only focus sessions that ran to completion are passed in; folderId stays null until Phase 4.
+     * Only focus sessions that ran to completion are passed in. Each carries the folderId fixed
+     * when its run started (null = unclassified).
      * Idempotent: `sessionId` is the primary key, so repeated calls keep one row per session.
      */
-    recordCompletedFocus(sessions: CompletedFocus[], folderId: string | null = null): void {
+    recordCompletedFocus(sessions: CompletedFocus[]): void {
       for (const s of sessions) {
         studySessions.record({
           id: s.sessionId,
-          folderId,
+          folderId: s.folderId ?? null,
           startedAt: s.startedAt,
           endedAt: s.endedAt,
           durationSeconds: s.durationSeconds,

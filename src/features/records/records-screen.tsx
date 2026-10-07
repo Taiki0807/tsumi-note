@@ -8,7 +8,10 @@ import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/desi
 import {
   chartMaxHours,
   formatDayLabel,
+  formatCorrectRate,
   formatDiff,
+  formatNeedsReviewDetail,
+  formatShortWeekRange,
   formatWeekRange,
   splitDuration,
   WEEKDAY_LABELS,
@@ -106,6 +109,49 @@ function WeekChart({ days, maxHours, today }: { days: DayRecord[]; maxHours: num
   );
 }
 
+/** Figma 02 › StatCard (Tone=primary / success / danger): label row, then icon + value. */
+function StatCard({
+  label,
+  value,
+  icon,
+  tone,
+}: {
+  label: string;
+  value: string;
+  icon: 'target' | 'check' | 'clock';
+  tone: 'primary' | 'success' | 'danger';
+}) {
+  const colors = useTheme();
+  const palette = {
+    primary: { bg: colors.primarySoft, fg: colors.primary },
+    success: { bg: colors.successSoft, fg: colors.successText },
+    danger: { bg: colors.dangerSoft, fg: colors.danger },
+  }[tone];
+  return (
+    <View
+      accessibilityLabel={`${label} ${value}`}
+      style={{ flex: 1, gap: 6, padding: 12, borderRadius: 12, backgroundColor: palette.bg }}
+    >
+      <Text
+        style={{
+          fontFamily: fontFamily.extraBold,
+          fontSize: 12,
+          lineHeight: 16,
+          color: colors.textSecondary,
+        }}
+      >
+        {label}
+      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Icon name={icon} size={18} color={palette.fg} />
+        <Text style={{ fontFamily: fontFamily.extraBold, fontSize: 18, lineHeight: 24, color: palette.fg }}>
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function IconButton({
   name,
   label,
@@ -159,6 +205,9 @@ export function RecordsScreen() {
         ? { bg: colors.surfaceMuted, fg: colors.textSecondary, icon: null }
         : { bg: colors.successSoft, fg: colors.successText, icon: 'arrow-up' as const };
   const folders = view?.folders ?? [];
+  const understanding = view?.understanding;
+  const needsReview = view?.needsReview ?? null;
+  const selectedFolderName = folders.find((f) => f.id === folderId)?.name ?? 'すべて';
 
   const numeric = {
     fontFamily: fontFamily.numeric,
@@ -348,6 +397,120 @@ export function RecordsScreen() {
               );
             })}
           </ScrollView>
+        )}
+
+        {understanding && (
+          <View
+            style={{
+              gap: 14,
+              padding: 20,
+              borderRadius: radius.lg,
+              borderWidth: 1,
+              borderColor: colors.divider,
+              backgroundColor: colors.surface,
+              ...shadow.card,
+            }}
+          >
+            <View
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+            >
+              <Text
+                style={{
+                  fontFamily: fontFamily.extraBold,
+                  fontSize: 18,
+                  lineHeight: 26,
+                  color: colors.textPrimary,
+                }}
+              >
+                {isCurrentWeek ? '今週の理解度' : 'この週の理解度'}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{
+                  flexShrink: 1,
+                  fontFamily: fontFamily.bold,
+                  fontSize: 12,
+                  lineHeight: 16,
+                  color: colors.textSecondary,
+                }}
+              >
+                {`${selectedFolderName} · ${formatShortWeekRange(weekStart)}`}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <StatCard label="解答数" value={`${understanding.answerCount}`} icon="target" tone="primary" />
+              <StatCard
+                label="正答率"
+                value={formatCorrectRate(understanding.correctRate)}
+                icon="check"
+                tone="success"
+              />
+              <StatCard label="時間切れ" value={`${understanding.timeoutCount}`} icon="clock" tone="danger" />
+            </View>
+            {understanding.answerCount === 0 && (
+              <Text
+                style={{
+                  textAlign: 'center',
+                  fontFamily: fontFamily.bold,
+                  fontSize: typography.bodySm.fontSize,
+                  lineHeight: typography.bodySm.lineHeight,
+                  color: colors.textSecondary,
+                }}
+              >
+                この週の復習記録はまだありません
+              </Text>
+            )}
+            {needsReview && (
+              <View
+                accessibilityLabel={`今週の要復習 ${needsReview.prompt} ${formatNeedsReviewDetail(needsReview)}`}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  backgroundColor: colors.warningSoft,
+                }}
+              >
+                <View
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: colors.warning,
+                  }}
+                >
+                  <Icon name="flame" size={20} color={colors.textOnPrimary} />
+                </View>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text
+                    style={{
+                      fontFamily: fontFamily.extraBold,
+                      fontSize: 12,
+                      lineHeight: 16,
+                      color: colors.warningText,
+                    }}
+                  >
+                    {isCurrentWeek ? '今週の要復習' : 'この週の要復習'}
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily: fontFamily.extraBold,
+                      fontSize: 15,
+                      lineHeight: 24,
+                      color: colors.textPrimary,
+                    }}
+                  >
+                    {`${needsReview.prompt} · ${formatNeedsReviewDetail(needsReview)}`}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
         )}
       </ScrollView>
     </View>

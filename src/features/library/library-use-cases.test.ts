@@ -12,7 +12,6 @@ import {
 function setup() {
   return createRepositories(createTestDeps().deps);
 }
-
 describe('library use cases', () => {
   it('returns an empty list and zero totals with no folders', () => {
     expect(loadFolderList(setup())).toEqual({ folders: [], totalQuestions: 0 });
@@ -39,7 +38,9 @@ describe('library use cases', () => {
     const repos = setup();
     const folder = repos.folders.create({ name: 'f' });
     const q = repos.questions.create({ folderId: folder.id, prompt: 'Q', answer: 'A' });
-    expect(loadFolderDetail(repos, folder.id)).toEqual({ folder, questions: [q] });
+    const detail = loadFolderDetail(repos, folder.id)!;
+    expect(detail.folder).toEqual(folder);
+    expect(detail.rows.map((r) => r.question)).toEqual([q]);
     expect(describeFolderDeletion(repos, folder.id)).toEqual({ questionCount: 1, noteCount: 0 });
 
     repos.folders.softDelete(folder.id);

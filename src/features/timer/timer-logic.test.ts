@@ -97,7 +97,7 @@ describe('advance', () => {
     });
     expect(r.events).toEqual(['focusEnd']);
     expect(r.completedFocus).toEqual([
-      { sessionId: 'run-1:1', startedAt: T0, endedAt: T0 + 25 * MIN, durationSeconds: 25 * 60 },
+      { sessionId: 'run-1:1', folderId: null, startedAt: T0, endedAt: T0 + 25 * MIN, durationSeconds: 25 * 60 },
     ]);
   });
 
@@ -135,6 +135,7 @@ describe('advance', () => {
     expect(r.completedFocus).toHaveLength(2);
     expect(r.completedFocus[1]).toEqual({
       sessionId: 'run-1:2',
+      folderId: null,
       startedAt: T0 + 30 * MIN,
       endedAt: T0 + 55 * MIN,
       durationSeconds: 25 * 60,

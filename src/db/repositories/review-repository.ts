@@ -1,0 +1,368 @@
+import { and, asc, count, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
+
+import {
+  newCardState,
+  previewReviews,
+  scheduleReview,
+  type FsrsCardState,
+  type ReviewRating,
+} from '../../domain/fsrs';
+import { answerHistory, folders, fsrsStates, questions, reviewHistory } from '../schema';
+import type { RepositoryDeps } from '../types';
+import type { Question } from './question-repository';
+
+export type ReviewHistoryEntry = typeof reviewHistory.$inferSelect;
+
+export type DueQuestion = {
+  question: Question;
+  folderName: string;
+  /** Persisted FSRS state, or a fresh card for a question that was never reviewed. */
+  card: FsrsCardState;
+  isNew: boolean;
+};
+
+export type ApplyRatingInput = {
+  /**
+   * Unique id of this review attempt (one per question presentation). It becomes the
+   * `review_history` primary key, so submitting the same attempt twice is a no-op.
+   */
+  attemptId: string;
+  questionId: string;
+  rating: ReviewRating;
+  timedOut: boolean;
+  elapsedMs: number | null;
+  /**
+   * Voluntary review of a question that was not due: history is appended but the FSRS state is
+   * left as is. PRODUCT_SPEC does not define this case, so the normal schedule is protected.
+   */
+  keepSchedule?: boolean;
+  /**
+   * The time the schedule is computed at. Pass the time used for `previewRatings` so the stored
+   * due equals the previewed one. Defaults to the current time.
+   */
+  reviewedAt?: number;
+};
+
+export type ApplyRatingResult =
+  | {
+      status: 'recorded';
+      card: FsrsCardState;
+      reviewedAt: number;
+      /** `false` for a question that was not due yet: history is stored, the schedule is untouched. */
+      scheduleUpdated: boolean;
+    }
+  | { status: 'duplicate'; card: FsrsCardState | undefined }
+  | { status: 'question-missing' };
+
+/** Answer History totals of one question. */
+export type AnswerStats = { attempts: number; incorrect: number; timeouts: number };
+
+type StateRow = typeof fsrsStates.$inferSelect;
+
+function rowToCard(row: StateRow): FsrsCardState {
+  return {
+    dueAt: row.due,
+    stability: row.stability,
+    difficulty: row.difficulty,
+    elapsedDays: row.elapsedDays,
+    scheduledDays: row.scheduledDays,
+    learningSteps: row.learningSteps,
+    reps: row.reps,
+    lapses: row.lapses,
+    state: row.state,
+    lastReviewAt: row.lastReview,
+  };
+}
+
+function cardToColumns(card: FsrsCardState) {
+  return {
+    due: card.dueAt,
+    stability: card.stability,
+    difficulty: card.difficulty,
+    elapsedDays: card.elapsedDays,
+    scheduledDays: card.scheduledDays,
+    learningSteps: card.learningSteps,
+    reps: card.reps,
+    lapses: card.lapses,
+    state: card.state,
+    lastReview: card.lastReviewAt,
+  };
+}
+
+/**
+ * FSRS state (mutable, one row per question) + Review History (append-only).
+ * A question without an `fsrs_states` row is new and due as of its creation time.
+ * All due comparisons are epoch-ms integers, so they do not depend on the time zone.
+ */
+export function createReviewRepository({ db, now }: RepositoryDeps) {
+  // Questions with no FSRS row are due from the moment they were created.
+  const effectiveDue = sql<number>`coalesce(${fsrsStates.due}, ${questions.createdAt})`;
+  const liveQuestion = and(isNull(questions.deletedAt), isNull(folders.deletedAt));
+  const inFolder = (folderId: string | undefined) =>
+    folderId ? eq(questions.folderId, folderId) : undefined;
+
+  return {
+    getState(questionId: string): FsrsCardState | undefined {
+      const row = db.select().from(fsrsStates).where(eq(fsrsStates.questionId, questionId)).get();
+      return row ? rowToCard(row) : undefined;
+    },
+
+    /**
+     * Due questions, nearest due first (ties: oldest question first). `limit` omitted = all;
+     * `folderId` restricts the result to one folder.
+     */
+    listDue(options: { at?: number; limit?: number; folderId?: string } = {}): DueQuestion[] {
+      const at = options.at ?? now();
+      const rows = db
+        .select({ question: questions, state: fsrsStates, folderName: folders.name })
+        .from(questions)
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .leftJoin(fsrsStates, eq(fsrsStates.questionId, questions.id))
+        .where(and(liveQuestion, lte(effectiveDue, at), inFolder(options.folderId)))
+        .orderBy(asc(effectiveDue), asc(questions.createdAt), asc(questions.id))
+        .limit(options.limit ?? -1)
+        .all();
+      return rows.map(({ question, state, folderName }) => ({
+        question,
+        folderName,
+        card: state ? rowToCard(state) : newCardState(question.createdAt),
+        isNew: state === null,
+      }));
+    },
+
+    /**
+     * The given live questions (due or not), ordered like `listDue`. Used for reviews whose
+     * targets are chosen on screen (folder filter + search).
+     */
+    listByIds(ids: string[]): DueQuestion[] {
+      if (ids.length === 0) return [];
+      const rows = db
+        .select({ question: questions, state: fsrsStates, folderName: folders.name })
+        .from(questions)
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .leftJoin(fsrsStates, eq(fsrsStates.questionId, questions.id))
+        .where(and(liveQuestion, inArray(questions.id, ids)))
+        .orderBy(asc(effectiveDue), asc(questions.createdAt), asc(questions.id))
+        .all();
+      return rows.map(({ question, state, folderName }) => ({
+        question,
+        folderName,
+        card: state ? rowToCard(state) : newCardState(question.createdAt),
+        isNew: state === null,
+      }));
+    },
+
+    /**
+     * Read-only: the four possible next states of a question at `at` (the same `scheduleReview`
+     * that `applyRating` runs). Writes nothing. `undefined` when the question does not exist.
+     */
+    previewRatings(questionId: string, at: number): Record<ReviewRating, FsrsCardState> | undefined {
+      const question = db
+        .select({ createdAt: questions.createdAt })
+        .from(questions)
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .where(and(eq(questions.id, questionId), liveQuestion))
+        .get();
+      if (!question) return undefined;
+      const row = db.select().from(fsrsStates).where(eq(fsrsStates.questionId, questionId)).get();
+      const card = row ? rowToCard(row) : newCardState(question.createdAt);
+      const preview = previewReviews(card, at);
+      return {
+        again: preview.again.next,
+        hard: preview.hard.next,
+        good: preview.good.next,
+        easy: preview.easy.next,
+      };
+    },
+
+    countDue(at: number = now(), folderId?: string): number {
+      return (
+        db
+          .select({ total: count() })
+          .from(questions)
+          .innerJoin(folders, eq(folders.id, questions.folderId))
+          .leftJoin(fsrsStates, eq(fsrsStates.questionId, questions.id))
+          .where(and(liveQuestion, lte(effectiveDue, at), inFolder(folderId)))
+          .get()?.total ?? 0
+      );
+    },
+
+    /** Due question count per folder id (folders with nothing due are absent). */
+    countDueByFolder(at: number = now()): Record<string, number> {
+      const rows = db
+        .select({ folderId: questions.folderId, total: count() })
+        .from(questions)
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .leftJoin(fsrsStates, eq(fsrsStates.questionId, questions.id))
+        .where(and(liveQuestion, lte(effectiveDue, at)))
+        .groupBy(questions.folderId)
+        .all();
+      return Object.fromEntries(rows.map((r) => [r.folderId, r.total]));
+    },
+
+    /**
+     * Answer History totals per live question of a folder (never-answered questions are absent).
+     * `incorrect` counts `incorrect` only; `timeouts` are kept apart (PRODUCT_SPEC: 時間切れは
+     * 不正解とは別に集計) but both count towards `attempts`.
+     */
+    answerStatsByFolder(folderId: string): Record<string, AnswerStats> {
+      const rows = db
+        .select({
+          questionId: answerHistory.questionId,
+          attempts: count(),
+          incorrect: sql<number>`coalesce(sum(case when ${answerHistory.result} = 'incorrect' then 1 else 0 end), 0)`,
+          timeouts: sql<number>`coalesce(sum(case when ${answerHistory.result} = 'timeout' then 1 else 0 end), 0)`,
+        })
+        .from(answerHistory)
+        .innerJoin(questions, eq(questions.id, answerHistory.questionId))
+        .where(and(eq(questions.folderId, folderId), isNull(questions.deletedAt)))
+        .groupBy(answerHistory.questionId)
+        .all();
+      return Object.fromEntries(
+        rows.map((r) => [
+          r.questionId,
+          { attempts: r.attempts, incorrect: Number(r.incorrect), timeouts: Number(r.timeouts) },
+        ]),
+      );
+    },
+
+    /**
+     * Answer History results with `answeredAt` in [fromInclusive, toExclusive), live questions
+     * only; `folderId` omitted = all folders. Feeds the 学習記録 「今週の理解度」.
+     */
+    listAnswersBetween(
+      fromInclusive: number,
+      toExclusive: number,
+      folderId?: string,
+    ): {
+      questionId: string;
+      prompt: string;
+      result: 'correct' | 'incorrect' | 'timeout';
+      answeredAt: number;
+    }[] {
+      return db
+        .select({
+          questionId: answerHistory.questionId,
+          prompt: questions.prompt,
+          result: answerHistory.result,
+          answeredAt: answerHistory.answeredAt,
+        })
+        .from(answerHistory)
+        .innerJoin(questions, eq(questions.id, answerHistory.questionId))
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .where(
+          and(
+            liveQuestion,
+            gte(answerHistory.answeredAt, fromInclusive),
+            lt(answerHistory.answeredAt, toExclusive),
+            inFolder(folderId),
+          ),
+        )
+        .all();
+    },
+
+    /** Live questions regardless of schedule: tells "no questions at all" from "nothing due now". */
+    countReviewable(): number {
+      return (
+        db
+          .select({ total: count() })
+          .from(questions)
+          .innerJoin(folders, eq(folders.id, questions.folderId))
+          .where(liveQuestion)
+          .get()?.total ?? 0
+      );
+    },
+
+    /** Earliest due time among questions that are not due yet (the "next review"), if any. */
+    nextDueAfter(at: number = now()): number | undefined {
+      const row = db
+        .select({ due: sql<number>`min(${fsrsStates.due})` })
+        .from(fsrsStates)
+        .innerJoin(questions, eq(questions.id, fsrsStates.questionId))
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .where(and(liveQuestion, sql`${fsrsStates.due} > ${at}`))
+        .get();
+      return row?.due ?? undefined;
+    },
+
+    /** Oldest first. */
+    listHistory(questionId: string): ReviewHistoryEntry[] {
+      return db
+        .select()
+        .from(reviewHistory)
+        .where(eq(reviewHistory.questionId, questionId))
+        .orderBy(asc(reviewHistory.reviewedAt), asc(reviewHistory.createdAt))
+        .all();
+    },
+
+    /**
+     * Rates a question: computes the next FSRS state with `ts-fsrs`, overwrites the current
+     * state, appends Review History and Answer History - all in ONE transaction, so a failure
+     * leaves nothing behind. Idempotent per `attemptId` (a repeated tap changes nothing).
+     */
+    applyRating(input: ApplyRatingInput): ApplyRatingResult {
+      return db.transaction((tx) => {
+        const existing = tx
+          .select({ id: reviewHistory.id })
+          .from(reviewHistory)
+          .where(eq(reviewHistory.id, input.attemptId))
+          .get();
+        const current = tx.select().from(fsrsStates).where(eq(fsrsStates.questionId, input.questionId)).get();
+        if (existing) return { status: 'duplicate', card: current ? rowToCard(current) : undefined };
+
+        const question = tx
+          .select({ id: questions.id, createdAt: questions.createdAt })
+          .from(questions)
+          .innerJoin(folders, eq(folders.id, questions.folderId))
+          .where(and(eq(questions.id, input.questionId), liveQuestion))
+          .get();
+        if (!question) return { status: 'question-missing' };
+
+        const reviewedAt = input.reviewedAt ?? now();
+        const before = current ? rowToCard(current) : newCardState(question.createdAt);
+        const { next, before: snapshot } = scheduleReview(before, input.rating, reviewedAt);
+
+        tx.insert(reviewHistory)
+          .values({
+            id: input.attemptId,
+            createdAt: reviewedAt,
+            questionId: input.questionId,
+            rating: input.rating,
+            reviewedAt,
+            timedOut: input.timedOut,
+            elapsedMs: input.elapsedMs,
+            state: snapshot.state,
+            due: snapshot.dueAt,
+            stability: snapshot.stability,
+            difficulty: snapshot.difficulty,
+            scheduledDays: snapshot.scheduledDays,
+            learningSteps: snapshot.learningSteps,
+          })
+          .run();
+        tx.insert(answerHistory)
+          .values({
+            id: input.attemptId,
+            createdAt: reviewedAt,
+            questionId: input.questionId,
+            result: input.timedOut ? 'timeout' : input.rating === 'again' ? 'incorrect' : 'correct',
+            answeredAt: reviewedAt,
+          })
+          .run();
+        if (input.keepSchedule) {
+          return { status: 'recorded', card: before, reviewedAt, scheduleUpdated: false };
+        }
+        tx.insert(fsrsStates)
+          .values({ questionId: input.questionId, ...cardToColumns(next), updatedAt: reviewedAt })
+          .onConflictDoUpdate({
+            target: fsrsStates.questionId,
+            set: { ...cardToColumns(next), updatedAt: reviewedAt },
+          })
+          .run();
+
+        return { status: 'recorded', card: next, reviewedAt, scheduleUpdated: true };
+      });
+    },
+  };
+}
+
+export type ReviewRepository = ReturnType<typeof createReviewRepository>;

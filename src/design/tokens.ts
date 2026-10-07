@@ -53,6 +53,8 @@ export type ThemeColors = {
   successText: string;
   successSoft: string;
   danger: string;
+  /** Figma Rate/もう一度 border (#f75555). */
+  dangerAccent: string;
   dangerSoft: string;
   warning: string;
   warningText: string;
@@ -80,6 +82,7 @@ export const lightColors: ThemeColors = {
   successText: palette.successText,
   successSoft: palette.successBg,
   danger: palette.danger,
+  dangerAccent: palette.dangerAccent,
   dangerSoft: palette.dangerBg,
   warning: palette.warning,
   warningText: palette.warningText,

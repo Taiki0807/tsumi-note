@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
  * Local-first schema (docs/ARCHITECTURE.md §6-§14).
@@ -75,9 +75,10 @@ export const settings = sqliteTable('settings', {
 });
 
 /**
- * Current FSRS scheduling state, one row per question.
- * `card` stores the serialized `ts-fsrs` Card. Its columns are decided in Phase 5 after the
- * actual ts-fsrs types are verified; `due` is denormalized for "next due" queries.
+ * Current FSRS scheduling state, one row per question (ts-fsrs 5.x `Card`).
+ * Mutable: overwritten on every review. The per-review record lives in `review_history`.
+ * A question without a row is a new card (`createEmptyCard`) that is due immediately.
+ * `due` / `last_review` are epoch ms (UTC); `state` is the ts-fsrs `State` enum (0-3).
  */
 export const fsrsStates = sqliteTable(
   'fsrs_states',
@@ -86,7 +87,15 @@ export const fsrsStates = sqliteTable(
       .primaryKey()
       .references(() => questions.id),
     due: integer('due').notNull(),
-    card: text('card').notNull(),
+    stability: real('stability').notNull().default(0),
+    difficulty: real('difficulty').notNull().default(0),
+    elapsedDays: integer('elapsed_days').notNull().default(0),
+    scheduledDays: integer('scheduled_days').notNull().default(0),
+    learningSteps: integer('learning_steps').notNull().default(0),
+    reps: integer('reps').notNull().default(0),
+    lapses: integer('lapses').notNull().default(0),
+    state: integer('state').notNull().default(0),
+    lastReview: integer('last_review'),
     updatedAt: integer('updated_at').notNull(),
   },
   (t) => [index('fsrs_states_due_idx').on(t.due)],
@@ -130,6 +139,13 @@ export const reviewHistory = sqliteTable(
     reviewedAt: integer('reviewed_at').notNull(),
     timedOut: integer('timed_out', { mode: 'boolean' }).notNull().default(false),
     elapsedMs: integer('elapsed_ms'),
+    /** Snapshot of the ts-fsrs `ReviewLog`: the card state *before* this review. */
+    state: integer('state').notNull().default(0),
+    due: integer('due').notNull().default(0),
+    stability: real('stability').notNull().default(0),
+    difficulty: real('difficulty').notNull().default(0),
+    scheduledDays: integer('scheduled_days').notNull().default(0),
+    learningSteps: integer('learning_steps').notNull().default(0),
   },
   (t) => [index('review_history_question_id_idx').on(t.questionId)],
 );

@@ -115,12 +115,105 @@ export function buildWeeklyRecord(
   };
 }
 
+export type AnswerLike = { result: 'correct' | 'incorrect' | 'timeout'; answeredAt: number };
+
+/** 「今週の理解度」 (Figma 02): the three StatCards. */
+export type Understanding = {
+  /** correct + incorrect + timeout. */
+  answerCount: number;
+  correctCount: number;
+  timeoutCount: number;
+  /** correctCount / answerCount in 0..1; null when nothing was answered (shown as 「—」, not 0%). */
+  correctRate: number | null;
+};
+
+/**
+ * Aggregates Answer History of the week [weekStart, next Monday) - the same local-time week as the
+ * study time. A timeout is counted as an answer but never as correct (PRODUCT_SPEC: 時間切れは
+ * 不正解とは別に集計), so it lowers the rate without being counted as incorrect.
+ */
+export function buildUnderstanding(answers: AnswerLike[], weekStart: number): Understanding {
+  const weekEnd = addWeeks(weekStart, 1);
+  const inWeek = answers.filter((a) => a.answeredAt >= weekStart && a.answeredAt < weekEnd);
+  const correctCount = inWeek.filter((a) => a.result === 'correct').length;
+  const timeoutCount = inWeek.filter((a) => a.result === 'timeout').length;
+  return {
+    answerCount: inWeek.length,
+    correctCount,
+    timeoutCount,
+    correctRate: inWeek.length === 0 ? null : correctCount / inWeek.length,
+  };
+}
+
+export type NeedsReview = {
+  questionId: string;
+  prompt: string;
+  incorrectCount: number;
+  /** All answers of the question in the week (correct + incorrect + timeout). */
+  attemptCount: number;
+  /** incorrectCount / attemptCount in 0..1. */
+  incorrectRate: number;
+};
+
+type QuestionAnswerLike = AnswerLike & { questionId: string; prompt: string };
+
+/**
+ * 「今週の要復習」 (Figma 02 › Needs review): the question with the highest error rate in the week
+ * (same week as the study time). Incorrect = result 'incorrect' (timeouts are separate but stay in
+ * the denominator, like 問題管理's 誤答率). Ties: more incorrect answers, then more attempts, then
+ * the question id. Questions without any incorrect answer are not listed; no data → null.
+ */
+export function buildNeedsReview(answers: QuestionAnswerLike[], weekStart: number): NeedsReview | null {
+  const weekEnd = addWeeks(weekStart, 1);
+  const byQuestion = new Map<string, NeedsReview>();
+  for (const a of answers) {
+    if (a.answeredAt < weekStart || a.answeredAt >= weekEnd) continue;
+    const row = byQuestion.get(a.questionId) ?? {
+      questionId: a.questionId,
+      prompt: a.prompt,
+      incorrectCount: 0,
+      attemptCount: 0,
+      incorrectRate: 0,
+    };
+    row.attemptCount += 1;
+    if (a.result === 'incorrect') row.incorrectCount += 1;
+    row.incorrectRate = row.incorrectCount / row.attemptCount;
+    byQuestion.set(a.questionId, row);
+  }
+  const candidates = [...byQuestion.values()].filter((r) => r.incorrectCount > 0);
+  candidates.sort(
+    (a, b) =>
+      b.incorrectRate - a.incorrectRate ||
+      b.incorrectCount - a.incorrectCount ||
+      b.attemptCount - a.attemptCount ||
+      a.questionId.localeCompare(b.questionId),
+  );
+  return candidates[0] ?? null;
+}
+
+/** e.g. 「誤答率 75%（6 / 8回）」. */
+export function formatNeedsReviewDetail(r: NeedsReview): string {
+  return `誤答率 ${Math.round(r.incorrectRate * 100)}%（${r.incorrectCount} / ${r.attemptCount}回）`;
+}
+
+/** e.g. 「75%」 (rounded to the nearest percent); no answers → 「—」. */
+export function formatCorrectRate(rate: number | null): string {
+  return rate === null ? '—' : `${Math.round(rate * 100)}%`;
+}
+
 /** e.g. 「9/7（月）– 9/13（日）」 (the Sunday is the last day of the week, not the exclusive end). */
 export function formatWeekRange(weekStart: number): string {
   const first = new Date(weekStart);
   const last = new Date(addDays(weekStart, 6));
   const fmt = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAY_LABELS[(d.getDay() + 6) % 7]}）`;
   return `${fmt(first)} – ${fmt(last)}`;
+}
+
+/** e.g. 「9/7–9/13」 (card subtitle of 「今週の理解度」). */
+export function formatShortWeekRange(weekStart: number): string {
+  const first = new Date(weekStart);
+  const last = new Date(addDays(weekStart, 6));
+  return `${first.getMonth() + 1}/${first.getDate()}–${last.getMonth() + 1}/${last.getDate()}`;
 }
 
 export function splitDuration(seconds: number): { hours: number; minutes: number } {

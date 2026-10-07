@@ -1,12 +1,13 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
-import { EmptyState, Button } from '@/components/form-ui';
+import { Button, EmptyState, SearchField } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
+import { Chip } from '@/features/review/review-ui';
 
 import { FolderFormSheet } from './folder-form-sheet';
 import type { FolderSummary } from './library-use-cases';
@@ -69,9 +70,20 @@ function FolderCard({ folder, index }: { folder: FolderSummary; index: number })
         >
           {folder.name}
         </Text>
-        <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
-          {folder.questionCount}問
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
+            {folder.questionCount}問
+          </Text>
+          {folder.dueCount > 0 ? (
+            <Chip
+              label={`復習 ${folder.dueCount}`}
+              icon="clock"
+              background={colors.warningSoft}
+              color={colors.warningText}
+              iconColor={colors.warning}
+            />
+          ) : null}
+        </View>
       </View>
       <Icon name="chevron-right" size={20} color={colors.textSecondary} strokeWidth={1.8} />
     </Pressable>
@@ -79,28 +91,35 @@ function FolderCard({ folder, index }: { folder: FolderSummary; index: number })
 }
 
 /** Figma 07 フォルダー一覧 (shown in the 復習 tab, whose tab is active in the design). */
-export function FolderListScreen() {
+export function FolderListScreen({ header }: { header?: ReactNode } = {}) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
-  const { folders, totalQuestions, createFolder } = useFolderList();
+  const { folders, totalQuestions, query, setQuery, createFolder } = useFolderList();
   const [creating, setCreating] = useState(false);
+  const searching = query.trim().length > 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
       <View
         style={{
-          height: 64,
           flexDirection: 'row',
           alignItems: 'center',
           gap: 12,
           paddingLeft: 24,
           paddingRight: 16,
+          paddingTop: 12,
+          paddingBottom: 8,
         }}
       >
         <AppIcon size={32} cornerRadius={50} />
         <Text
           accessibilityRole="header"
-          style={{ fontFamily: fontFamily.extraBold, ...typography.heading, color: colors.textPrimary }}
+          style={{
+            flex: 1,
+            fontFamily: fontFamily.extraBold,
+            ...typography.heading,
+            color: colors.textPrimary,
+          }}
         >
           フォルダー
         </Text>
@@ -110,23 +129,40 @@ export function FolderListScreen() {
           alignSelf: 'center',
           width: '100%',
           maxWidth: layout.contentMaxWidth,
-          gap: 14,
+          gap: 16,
           paddingTop: 8,
           paddingHorizontal: 24,
           paddingBottom: 24,
         }}
       >
-        <View style={{ gap: 2 }}>
-          <Text
-            style={{ fontFamily: fontFamily.extraBold, ...typography.headingSm, color: colors.textPrimary }}
-          >
-            学びたい分野を選びましょう
-          </Text>
-          <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}>
-            {folders.length}フォルダー · {totalQuestions}問
-          </Text>
+        {header}
+        <View style={{ gap: 12, paddingTop: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text
+                style={{
+                  fontFamily: fontFamily.extraBold,
+                  ...typography.headingSm,
+                  color: colors.textPrimary,
+                }}
+              >
+                学びたい分野を選びましょう
+              </Text>
+              <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}>
+                {folders.length}フォルダー · {totalQuestions}問
+              </Text>
+            </View>
+            <Button label="＋ 作成" variant="secondary" size="sm" onPress={() => setCreating(true)} />
+          </View>
+          <SearchField height={44} value={query} onChangeText={setQuery} placeholder="フォルダーを検索" />
         </View>
-        {folders.length === 0 ? (
+        {folders.length === 0 && searching ? (
+          <EmptyState
+            icon="search"
+            title="該当するフォルダーがありません"
+            description={`「${query.trim()}」に一致するフォルダー名は見つかりませんでした`}
+          />
+        ) : folders.length === 0 ? (
           <EmptyState
             icon="folder"
             title="フォルダーがありません"
@@ -135,17 +171,6 @@ export function FolderListScreen() {
         ) : (
           folders.map((folder, index) => <FolderCard key={folder.id} folder={folder} index={index} />)
         )}
-        <Button label="＋ フォルダーを作成" variant="secondary" onPress={() => setCreating(true)} />
-        <Text
-          style={{
-            textAlign: 'center',
-            fontFamily: fontFamily.bold,
-            ...typography.caption,
-            color: colors.textSecondary,
-          }}
-        >
-          各フォルダーに問題を追加して学習できます
-        </Text>
       </ScrollView>
       <FolderFormSheet
         visible={creating}

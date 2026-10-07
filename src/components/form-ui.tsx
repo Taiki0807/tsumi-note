@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -25,11 +25,14 @@ export function Button({
   variant = 'primary',
   disabled,
   flex,
+  size = 'md',
 }: {
   label: string;
   onPress: () => void;
   variant?: 'primary' | 'secondary' | 'danger';
   disabled?: boolean;
+  /** `sm`: Figma 36pt pill (e.g. 「＋ 作成」) with a 13/ExtraBold label. */
+  size?: 'md' | 'sm';
   /** Share the row equally with a sibling button (Figma: 165pt each, gap 12). */
   flex?: boolean;
 }) {
@@ -44,8 +47,8 @@ export function Button({
       onPress={onPress}
       style={{
         flex: flex ? 1 : undefined,
-        height: 56,
-        paddingHorizontal: 32,
+        height: size === 'sm' ? 36 : 56,
+        paddingHorizontal: size === 'sm' ? 16 : 32,
         borderRadius: radius.full,
         alignItems: 'center',
         justifyContent: 'center',
@@ -57,7 +60,7 @@ export function Button({
       <Text
         style={{
           fontFamily: fontFamily.extraBold,
-          ...typography.button,
+          ...(size === 'sm' ? typography.label : typography.button),
           color: primary ? colors.textOnPrimary : danger ? colors.danger : colors.primary,
         }}
       >
@@ -77,7 +80,7 @@ export function IconButton({
   name: IconName;
   label: string;
   onPress: () => void;
-  tone?: 'plain' | 'soft';
+  tone?: 'plain' | 'soft' | 'surface';
 }) {
   const colors = useTheme();
   const soft = tone === 'soft';
@@ -92,11 +95,67 @@ export function IconButton({
         borderRadius: radius.xl,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: soft ? colors.primarySoft : undefined,
+        backgroundColor: soft ? colors.primarySoft : tone === 'surface' ? colors.surface : undefined,
       }}
     >
       <Icon name={name} size={22} color={soft ? colors.primary : colors.textPrimary} strokeWidth={2.2} />
     </Pressable>
+  );
+}
+
+/**
+ * Figma Search field: 48pt high pill, gray-100 fill, 16pt horizontal padding, 10pt gap,
+ * 20pt search icon, 15/24 Medium text (placeholder in textSecondary).
+ */
+export function SearchField({
+  value,
+  onChangeText,
+  placeholder,
+  inputRef,
+  height = 48,
+}: {
+  /** 48 in the question list (Figma 08), 44 in the folder list (Figma 07). */
+  height?: number;
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder: string;
+  inputRef?: Ref<TextInput>;
+}) {
+  const colors = useTheme();
+  return (
+    <View
+      style={{
+        height,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        paddingHorizontal: 16,
+        borderRadius: radius.full,
+        backgroundColor: colors.surfaceMuted,
+      }}
+    >
+      <Icon name="search" size={20} color={colors.textSecondary} strokeWidth={2} />
+      <TextInput
+        ref={inputRef}
+        accessibilityLabel={placeholder}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.textSecondary}
+        returnKeyType="search"
+        autoCapitalize="none"
+        autoCorrect={false}
+        clearButtonMode="while-editing"
+        style={{
+          flex: 1,
+          padding: 0,
+          fontFamily: fontFamily.regular,
+          fontSize: typography.body.fontSize,
+          lineHeight: typography.body.lineHeight,
+          color: colors.textPrimary,
+        }}
+      />
+    </View>
   );
 }
 
