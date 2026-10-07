@@ -40,15 +40,11 @@ function StatCard({
       }}
     >
       <View style={{ height: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: toneSoft }}>
-        <Text style={{ fontFamily: fontFamily.extraBold, ...typography.caption, color: toneText }}>
-          {label}
-        </Text>
+        <Text style={{ fontFamily: fontFamily.extraBold, ...typography.caption, color: toneText }}>{label}</Text>
       </View>
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
         <Icon name={icon} size={20} color={toneColor} handsColor={colors.textPrimary} strokeWidth={1.83} />
-        <Text
-          style={{ fontFamily: fontFamily.numeric, fontSize: 18, lineHeight: 28, color: colors.textPrimary }}
-        >
+        <Text style={{ fontFamily: fontFamily.numeric, fontSize: 18, lineHeight: 28, color: colors.textPrimary }}>
           {value}
         </Text>
       </View>
@@ -224,12 +220,7 @@ export default function TimerScreen() {
 
         {/* Today stats (Figma 192:126): two StatCards 165x80, gap 12, radius 12, 2pt tone border. */}
         <View style={{ marginTop: 16, flexDirection: 'row', gap: 12 }}>
-          <StatCard
-            tone="success"
-            label="今日の集中"
-            value={formatFocusMinutes(today.seconds)}
-            icon="clock"
-          />
+          <StatCard tone="success" label="今日の集中" value={formatFocusMinutes(today.seconds)} icon="clock" />
           <StatCard tone="primary" label="完了" value={`${today.sessionCount}セッション`} icon="check" />
         </View>
       </ScrollView>

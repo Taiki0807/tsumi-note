@@ -1,12 +1,4 @@
-import {
-  createIdleState,
-  pause,
-  reset,
-  resume,
-  start,
-  type TimerSettings,
-  type TimerState,
-} from './timer-logic';
+import { createIdleState, pause, reset, resume, start, type TimerSettings, type TimerState } from './timer-logic';
 import { createNotificationSynchronizer, type NotificationBackend } from './timer-notification-sync';
 
 const settings: TimerSettings = { focusMinutes: 25, breakMinutes: 5, rounds: 2 };

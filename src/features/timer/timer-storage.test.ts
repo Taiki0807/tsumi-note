@@ -131,12 +131,7 @@ describe('timer storage', () => {
     storage.recordCompletedFocus(done.completedFocus);
     const rows = repos.studySessions.listSince(0);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      id: 'run-1:1',
-      startedAt: 1_000,
-      endedAt: end,
-      durationSeconds: 25 * 60,
-    });
+    expect(rows[0]).toMatchObject({ id: 'run-1:1', startedAt: 1_000, endedAt: end, durationSeconds: 25 * 60 });
     expect(rows[0]!.startedAt).not.toBe(end - 25 * MIN);
   });
 });

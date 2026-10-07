@@ -290,10 +290,7 @@ describe('today stats for the timer screen (shared aggregation)', () => {
     const { repos, storage } = setup();
     const s = { ...DEFAULT_TIMER_SETTINGS, rounds: 1 };
     const t0 = local(2026, 9, 8, 9);
-    const done = advance(
-      start(createIdleState(s), s, t0, () => 'run-1'),
-      t0 + 25 * MIN,
-    );
+    const done = advance(start(createIdleState(s), s, t0, () => 'run-1'), t0 + 25 * MIN);
     storage.recordCompletedFocus(done.completedFocus);
     storage.recordCompletedFocus(done.completedFocus); // idempotent
 
