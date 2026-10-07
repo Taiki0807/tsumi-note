@@ -32,6 +32,9 @@ export type ApplyRatingResult =
   | { status: 'duplicate'; card: FsrsCardState | undefined }
   | { status: 'question-missing' };
 
+/** Answer History totals of one question. */
+export type AnswerStats = { attempts: number; incorrect: number; timeouts: number };
+
 type StateRow = typeof fsrsStates.$inferSelect;
 
 function rowToCard(row: StateRow): FsrsCardState {
@@ -73,6 +76,8 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
   // Questions with no FSRS row are due from the moment they were created.
   const effectiveDue = sql<number>`coalesce(${fsrsStates.due}, ${questions.createdAt})`;
   const liveQuestion = and(isNull(questions.deletedAt), isNull(folders.deletedAt));
+  const inFolder = (folderId: string | undefined) =>
+    folderId ? eq(questions.folderId, folderId) : undefined;
 
   return {
     getState(questionId: string): FsrsCardState | undefined {
@@ -80,15 +85,18 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
       return row ? rowToCard(row) : undefined;
     },
 
-    /** Due questions, nearest due first (ties: oldest question first). `limit` omitted = all. */
-    listDue(options: { at?: number; limit?: number } = {}): DueQuestion[] {
+    /**
+     * Due questions, nearest due first (ties: oldest question first). `limit` omitted = all;
+     * `folderId` restricts the result to one folder.
+     */
+    listDue(options: { at?: number; limit?: number; folderId?: string } = {}): DueQuestion[] {
       const at = options.at ?? now();
       const rows = db
         .select({ question: questions, state: fsrsStates, folderName: folders.name })
         .from(questions)
         .innerJoin(folders, eq(folders.id, questions.folderId))
         .leftJoin(fsrsStates, eq(fsrsStates.questionId, questions.id))
-        .where(and(liveQuestion, lte(effectiveDue, at)))
+        .where(and(liveQuestion, lte(effectiveDue, at), inFolder(options.folderId)))
         .orderBy(asc(effectiveDue), asc(questions.createdAt), asc(questions.id))
         .limit(options.limit ?? -1)
         .all();
@@ -100,15 +108,54 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
       }));
     },
 
-    countDue(at: number = now()): number {
+    countDue(at: number = now(), folderId?: string): number {
       return (
         db
           .select({ total: count() })
           .from(questions)
           .innerJoin(folders, eq(folders.id, questions.folderId))
           .leftJoin(fsrsStates, eq(fsrsStates.questionId, questions.id))
-          .where(and(liveQuestion, lte(effectiveDue, at)))
+          .where(and(liveQuestion, lte(effectiveDue, at), inFolder(folderId)))
           .get()?.total ?? 0
+      );
+    },
+
+    /** Due question count per folder id (folders with nothing due are absent). */
+    countDueByFolder(at: number = now()): Record<string, number> {
+      const rows = db
+        .select({ folderId: questions.folderId, total: count() })
+        .from(questions)
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .leftJoin(fsrsStates, eq(fsrsStates.questionId, questions.id))
+        .where(and(liveQuestion, lte(effectiveDue, at)))
+        .groupBy(questions.folderId)
+        .all();
+      return Object.fromEntries(rows.map((r) => [r.folderId, r.total]));
+    },
+
+    /**
+     * Answer History totals per live question of a folder (never-answered questions are absent).
+     * `incorrect` counts `incorrect` only; `timeouts` are kept apart (PRODUCT_SPEC: 時間切れは
+     * 不正解とは別に集計) but both count towards `attempts`.
+     */
+    answerStatsByFolder(folderId: string): Record<string, AnswerStats> {
+      const rows = db
+        .select({
+          questionId: answerHistory.questionId,
+          attempts: count(),
+          incorrect: sql<number>`coalesce(sum(case when ${answerHistory.result} = 'incorrect' then 1 else 0 end), 0)`,
+          timeouts: sql<number>`coalesce(sum(case when ${answerHistory.result} = 'timeout' then 1 else 0 end), 0)`,
+        })
+        .from(answerHistory)
+        .innerJoin(questions, eq(questions.id, answerHistory.questionId))
+        .where(and(eq(questions.folderId, folderId), isNull(questions.deletedAt)))
+        .groupBy(answerHistory.questionId)
+        .all();
+      return Object.fromEntries(
+        rows.map((r) => [
+          r.questionId,
+          { attempts: r.attempts, incorrect: Number(r.incorrect), timeouts: Number(r.timeouts) },
+        ]),
       );
     },
 

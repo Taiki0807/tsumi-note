@@ -16,6 +16,7 @@ export type IconName =
   | 'arrow-left'
   | 'plus'
   | 'close'
+  | 'search'
   | 'folder';
 
 type Props = {
@@ -95,6 +96,12 @@ export function Icon({ name, size, color, strokeWidth = 2, handsColor }: Props) 
           <Circle cx={5} cy={12} r={1.5} fill={color} />
           <Circle cx={12} cy={12} r={1.5} fill={color} />
           <Circle cx={19} cy={12} r={1.5} fill={color} />
+        </>
+      )}
+      {name === 'search' && (
+        <>
+          <Circle cx={11} cy={11} r={7} {...common} />
+          <Path d="M16.5 16.5L21 21" {...common} />
         </>
       )}
       {name === 'user' && (

@@ -20,6 +20,7 @@ export type Repositories = ReturnType<typeof createRepositories>;
 export type { Folder, FolderRepository } from './folder-repository';
 export type { Question, QuestionRepository } from './question-repository';
 export type {
+  AnswerStats,
   ApplyRatingInput,
   ApplyRatingResult,
   DueQuestion,

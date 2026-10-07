@@ -1,8 +1,9 @@
-import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, isNull, or } from 'drizzle-orm';
 
 import { normalizeQuestionInput } from '../../domain/validation';
 import { folders, questions } from '../schema';
 import type { RepositoryDeps } from '../types';
+import { containsPattern, likeContains } from './search';
 
 export type Question = typeof questions.$inferSelect;
 
@@ -44,12 +45,21 @@ export function createQuestionRepository({ db, now, newId }: RepositoryDeps) {
         .get();
     },
 
-    /** Newest first. */
-    listByFolder(folderId: string): Question[] {
+    /** Newest first. A non-blank `query` keeps questions whose prompt or answer contains it. */
+    listByFolder(folderId: string, options: { query?: string } = {}): Question[] {
+      const pattern = containsPattern(options.query);
       return db
         .select()
         .from(questions)
-        .where(and(eq(questions.folderId, folderId), isNull(questions.deletedAt)))
+        .where(
+          and(
+            eq(questions.folderId, folderId),
+            isNull(questions.deletedAt),
+            pattern
+              ? or(likeContains(questions.prompt, pattern), likeContains(questions.answer, pattern))
+              : undefined,
+          ),
+        )
         .orderBy(desc(questions.createdAt))
         .all();
     },

@@ -56,10 +56,18 @@ export function loadReviewOverview(repos: ReviewRepos, now: number): ReviewOverv
   };
 }
 
-/** Use case: due questions (nearest due first), capped by the session size. Never padded. */
-export function selectSessionItems(repos: ReviewRepos, settings: ReviewSettings, now: number): SessionItem[] {
+/**
+ * Use case: due questions (nearest due first), capped by the session size. Never padded.
+ * `folderId` limits the session to one folder (Figma 08「N問を復習」).
+ */
+export function selectSessionItems(
+  repos: ReviewRepos,
+  settings: ReviewSettings,
+  now: number,
+  folderId?: string,
+): SessionItem[] {
   const limit = settings.sessionSize === 'all' ? undefined : settings.sessionSize;
-  return toSessionItems(repos.review.listDue({ at: now, limit }));
+  return toSessionItems(repos.review.listDue({ at: now, limit, folderId }));
 }
 
 /**

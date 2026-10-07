@@ -3,6 +3,7 @@ import { and, asc, count, eq, isNull } from 'drizzle-orm';
 import { normalizeFolderName } from '../../domain/validation';
 import { folders, notes, questions } from '../schema';
 import type { RepositoryDeps } from '../types';
+import { containsPattern, likeContains } from './search';
 
 export type Folder = typeof folders.$inferSelect;
 
@@ -47,8 +48,15 @@ export function createFolderRepository({ db, now, newId }: RepositoryDeps) {
       return row?.n ?? 0;
     },
 
-    list(): Folder[] {
-      return db.select().from(folders).where(isNull(folders.deletedAt)).orderBy(asc(folders.createdAt)).all();
+    /** Live folders, oldest first. A non-blank `query` keeps folders whose name contains it. */
+    list(options: { query?: string } = {}): Folder[] {
+      const pattern = containsPattern(options.query);
+      return db
+        .select()
+        .from(folders)
+        .where(and(isNull(folders.deletedAt), pattern ? likeContains(folders.name, pattern) : undefined))
+        .orderBy(asc(folders.createdAt))
+        .all();
     },
 
     rename(id: string, name: string): void {

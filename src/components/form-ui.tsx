@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -97,6 +97,59 @@ export function IconButton({
     >
       <Icon name={name} size={22} color={soft ? colors.primary : colors.textPrimary} strokeWidth={2.2} />
     </Pressable>
+  );
+}
+
+/**
+ * Figma Search field: 48pt high pill, gray-100 fill, 16pt horizontal padding, 10pt gap,
+ * 20pt search icon, 15/24 Medium text (placeholder in textSecondary).
+ */
+export function SearchField({
+  value,
+  onChangeText,
+  placeholder,
+  inputRef,
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder: string;
+  inputRef?: Ref<TextInput>;
+}) {
+  const colors = useTheme();
+  return (
+    <View
+      style={{
+        height: 48,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        paddingHorizontal: 16,
+        borderRadius: radius.full,
+        backgroundColor: colors.surfaceMuted,
+      }}
+    >
+      <Icon name="search" size={20} color={colors.textSecondary} strokeWidth={2} />
+      <TextInput
+        ref={inputRef}
+        accessibilityLabel={placeholder}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.textSecondary}
+        returnKeyType="search"
+        autoCapitalize="none"
+        autoCorrect={false}
+        clearButtonMode="while-editing"
+        style={{
+          flex: 1,
+          padding: 0,
+          fontFamily: fontFamily.regular,
+          fontSize: typography.body.fontSize,
+          lineHeight: typography.body.lineHeight,
+          color: colors.textPrimary,
+        }}
+      />
+    </View>
   );
 }
 

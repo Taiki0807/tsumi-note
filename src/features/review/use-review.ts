@@ -82,14 +82,17 @@ export function useReviewSession() {
     };
   }, [timing, sync]);
 
-  const start = useCallback(() => {
-    const at = Date.now();
-    const settings = loadReviewSettings(repos);
-    const items = selectSessionItems(repos, settings, at);
-    setError(null);
-    setNow(at);
-    setState(startSession(items, settings, at, randomUUID));
-  }, [repos, setState]);
+  const start = useCallback(
+    (folderId?: string) => {
+      const at = Date.now();
+      const settings = loadReviewSettings(repos);
+      const items = selectSessionItems(repos, settings, at, folderId);
+      setError(null);
+      setNow(at);
+      setState(startSession(items, settings, at, randomUUID));
+    },
+    [repos, setState],
+  );
 
   const showAnswer = useCallback(() => {
     const at = Date.now();

@@ -3,24 +3,83 @@ import { useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, EmptyState, IconButton } from '@/components/form-ui';
+import { Button, EmptyState, IconButton, SearchField } from '@/components/form-ui';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 import type { Question } from '@/db/repositories';
+import { Chip, ProgressBar } from '@/features/review/review-ui';
 
 import { FolderFormSheet } from './folder-form-sheet';
 import { folderDeletionMessage } from './library-use-cases';
+import { incorrectPercent, type QuestionFilter, type QuestionRow } from './question-list';
 import { QuestionFormSheet } from './question-form-sheet';
 import { useFolderDetail } from './use-library';
 
-function QuestionCard({ question, onPress }: { question: Question; onPress: () => void }) {
+/** Figma 08 SegmentedTabs: selected = primary fill / white text, others = 2pt primary outline. */
+function FilterTabs({
+  counts,
+  value,
+  onChange,
+}: {
+  counts: Record<QuestionFilter, number>;
+  value: QuestionFilter;
+  onChange: (next: QuestionFilter) => void;
+}) {
   const colors = useTheme();
+  const tabs: { key: QuestionFilter; label: string }[] = [
+    { key: 'all', label: 'すべて' },
+    { key: 'due', label: '復習待ち' },
+    { key: 'weak', label: '苦手' },
+  ];
+  return (
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      {tabs.map(({ key, label }) => {
+        const selected = key === value;
+        return (
+          <Pressable
+            key={key}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            onPress={() => onChange(key)}
+            style={{
+              flex: 1,
+              height: 36,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: radius.full,
+              borderWidth: 2,
+              borderColor: colors.primary,
+              backgroundColor: selected ? colors.primary : 'transparent',
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: fontFamily.extraBold,
+                ...typography.bodySm,
+                color: selected ? colors.textOnPrimary : colors.primary,
+              }}
+            >
+              {label} {counts[key]}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Figma Question card: prompt + 誤答 chip, then an incorrect-rate bar with 「不正解 n / m回」. */
+function QuestionCard({ row, onPress }: { row: QuestionRow; onPress: () => void }) {
+  const colors = useTheme();
+  const percent = incorrectPercent(row);
+  // Figma: 75% / 50% use the danger tones, 20% the success tones.
+  const high = (row.incorrectRate ?? 0) >= 0.5;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`問題を編集: ${question.prompt}`}
+      accessibilityLabel={`問題を編集: ${row.question.prompt}`}
       onPress={onPress}
       style={{
-        gap: 8,
+        gap: 12,
         padding: 16,
         borderRadius: radius.lg,
         borderWidth: 1,
@@ -29,18 +88,33 @@ function QuestionCard({ question, onPress }: { question: Question; onPress: () =
         ...shadow.card,
       }}
     >
-      <Text
-        numberOfLines={2}
-        style={{ fontFamily: fontFamily.extraBold, fontSize: 17, lineHeight: 24, color: colors.textPrimary }}
-      >
-        {question.prompt}
-      </Text>
-      <Text
-        numberOfLines={2}
-        style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}
-      >
-        {question.answer}
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            flex: 1,
+            fontFamily: fontFamily.extraBold,
+            fontSize: 17,
+            lineHeight: 24,
+            color: colors.textPrimary,
+          }}
+        >
+          {row.question.prompt}
+        </Text>
+        {percent !== null ? (
+          <Chip
+            label={`誤答 ${percent}%`}
+            background={high ? colors.dangerSoft : colors.successSoft}
+            color={high ? colors.danger : colors.successText}
+          />
+        ) : null}
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <ProgressBar fraction={row.incorrectRate ?? 0} color={high ? colors.dangerAccent : colors.success} />
+        <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
+          {row.attempts === 0 ? '未回答' : `不正解 ${row.incorrect} / ${row.attempts}回`}
+        </Text>
+      </View>
     </Pressable>
   );
 }
@@ -56,6 +130,27 @@ export function FolderDetailScreen() {
   const folder = useFolderDetail(id);
   const [sheet, setSheet] = useState<Sheet>({ kind: 'none' });
   const close = () => setSheet({ kind: 'none' });
+  const searching = folder.query.trim().length > 0;
+
+  const emptyList = (noQuestions: boolean) =>
+    noQuestions ? (
+      <>
+        <EmptyState
+          icon="note"
+          title="問題がありません"
+          description="右上の＋から最初の問題を作成しましょう"
+        />
+        <Button label="＋ 問題を作成" variant="secondary" onPress={() => setSheet({ kind: 'create' })} />
+      </>
+    ) : (
+      <EmptyState
+        icon={searching ? 'search' : 'note'}
+        title="該当する問題がありません"
+        description={
+          searching ? '検索ワードやタブを変えてみてください' : 'このタブに表示できる問題はありません'
+        }
+      />
+    );
 
   const detail = folder.detail;
   if (!detail) {
@@ -150,27 +245,52 @@ export function FolderDetailScreen() {
           gap: 14,
           paddingTop: 8,
           paddingHorizontal: 24,
-          paddingBottom: Math.max(insets.bottom, 24) + 24,
+          paddingBottom: 24,
         }}
       >
-        <Text style={{ fontFamily: fontFamily.extraBold, ...typography.bodySm, color: colors.textPrimary }}>
-          全{detail.questions.length}問
-        </Text>
-        {detail.questions.length === 0 ? (
-          <>
-            <EmptyState
-              icon="note"
-              title="問題がありません"
-              description="右上の＋から最初の問題を作成しましょう"
-            />
-            <Button label="＋ 問題を作成" variant="secondary" onPress={() => setSheet({ kind: 'create' })} />
-          </>
-        ) : (
-          detail.questions.map((q) => (
-            <QuestionCard key={q.id} question={q} onPress={() => setSheet({ kind: 'edit', question: q })} />
-          ))
-        )}
+        <SearchField value={folder.query} onChangeText={folder.setQuery} placeholder="問題・単語を検索" />
+        <FilterTabs counts={detail.counts} value={folder.filter} onChange={folder.setFilter} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={{ fontFamily: fontFamily.extraBold, ...typography.bodySm, color: colors.textPrimary }}>
+            全{detail.rows.length}問
+          </Text>
+          <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
+            誤答率の高い順
+          </Text>
+        </View>
+        {detail.rows.length === 0
+          ? emptyList(detail.counts.all === 0 && !searching)
+          : detail.rows.map((row) => (
+              <QuestionCard
+                key={row.question.id}
+                row={row}
+                onPress={() => setSheet({ kind: 'edit', question: row.question })}
+              />
+            ))}
       </ScrollView>
+      <View
+        style={{
+          flexDirection: 'row',
+          gap: 12,
+          paddingHorizontal: 24,
+          paddingTop: 16,
+          paddingBottom: Math.max(insets.bottom, 16),
+          backgroundColor: colors.background,
+        }}
+      >
+        <Button flex label="復習設定" variant="secondary" onPress={() => router.push('/review/settings')} />
+        <Button
+          flex
+          label={`${detail.dueCount}問を復習`}
+          disabled={detail.dueCount === 0}
+          onPress={() =>
+            router.navigate({
+              pathname: '/(tabs)/review',
+              params: { folderId: detail.folder.id, run: String(Date.now()) },
+            })
+          }
+        />
+      </View>
 
       <QuestionFormSheet
         visible={sheet.kind === 'create' || sheet.kind === 'edit'}

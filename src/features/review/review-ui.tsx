@@ -12,7 +12,8 @@ export function Chip({
   iconColor = color,
 }: {
   label: string;
-  icon: IconName;
+  /** Omitted for chips whose icon is hidden in Figma (Chip/誤答). */
+  icon?: IconName;
   background: string;
   color: string;
   iconColor?: string;
@@ -29,7 +30,7 @@ export function Chip({
         backgroundColor: background,
       }}
     >
-      <Icon name={icon} size={16} color={iconColor} strokeWidth={1.8} />
+      {icon ? <Icon name={icon} size={16} color={iconColor} strokeWidth={1.8} /> : null}
       <Text numberOfLines={1} style={{ fontFamily: fontFamily.extraBold, ...typography.label, color }}>
         {label}
       </Text>
@@ -38,7 +39,7 @@ export function Chip({
 }
 
 /** Figma ProgressBar: 8pt high, radius 4, gray-100 track with a primary fill. */
-export function ProgressBar({ fraction }: { fraction: number }) {
+export function ProgressBar({ fraction, color }: { fraction: number; color?: string }) {
   const colors = useTheme();
   return (
     <View
@@ -50,7 +51,7 @@ export function ProgressBar({ fraction }: { fraction: number }) {
           width: `${Math.min(1, Math.max(0, fraction)) * 100}%`,
           height: 8,
           borderRadius: radius.xs,
-          backgroundColor: colors.primary,
+          backgroundColor: color ?? colors.primary,
         }}
       />
     </View>

@@ -10,6 +10,7 @@ import {
   type FolderDetail,
   type FolderList,
 } from './library-use-cases';
+import type { QuestionFilter } from './question-list';
 
 /** Returns a counter that bumps on screen focus and on `invalidate()` (after a write). No polling. */
 function useRevision() {
@@ -23,12 +24,19 @@ export function useFolderList() {
   const repos = useRepositories();
   const { revision, invalidate } = useRevision();
 
-  // `revision` forces a re-read after focus / writes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const list: FolderList = useMemo(() => loadFolderList(repos), [repos, revision]);
+  const [query, setQuery] = useState('');
+
+  const list: FolderList = useMemo(
+    () => loadFolderList(repos, { query }),
+    // `revision` forces a re-read after focus / writes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [repos, query, revision],
+  );
 
   return {
     ...list,
+    query,
+    setQuery,
     createFolder: (name: string) => {
       const folder = repos.folders.create({ name });
       invalidate();
@@ -41,15 +49,22 @@ export function useFolderDetail(folderId: string) {
   const repos = useRepositories();
   const { revision, invalidate } = useRevision();
 
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<QuestionFilter>('all');
+
   const detail: FolderDetail | undefined = useMemo(
-    () => loadFolderDetail(repos, folderId),
+    () => loadFolderDetail(repos, folderId, { query, filter }),
     // `revision` forces a re-read after focus / writes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [repos, folderId, revision],
+    [repos, folderId, query, filter, revision],
   );
 
   return {
     detail,
+    query,
+    setQuery,
+    filter,
+    setFilter,
     renameFolder: (name: string) => {
       repos.folders.rename(folderId, name);
       invalidate();
