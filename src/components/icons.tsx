@@ -4,6 +4,7 @@ export type IconName =
   | 'chart'
   | 'note'
   | 'clock'
+  | 'check'
   | 'cards'
   | 'user'
   | 'settings'
@@ -19,6 +20,8 @@ type Props = {
   color: string;
   /** Matches the Figma stroke weight (heavier when the tab is active). */
   strokeWidth?: number;
+  /** Clock only: colour of the hands when it differs from the outline (Figma StatCard). */
+  handsColor?: string;
 };
 
 /**
@@ -26,7 +29,7 @@ type Props = {
  * Figma only exposes the vector bounds through the REST API, so the paths are drawn to those
  * bounds and should be swapped for exported SVGs when available.
  */
-export function Icon({ name, size, color, strokeWidth = 2 }: Props) {
+export function Icon({ name, size, color, strokeWidth = 2, handsColor }: Props) {
   const common = {
     stroke: color,
     strokeWidth,
@@ -54,9 +57,10 @@ export function Icon({ name, size, color, strokeWidth = 2 }: Props) {
       {name === 'clock' && (
         <>
           <Circle cx={12} cy={12} r={9} {...common} />
-          <Path d="M12 7v5l3 2" {...common} />
+          <Path d="M12 7v5l3 2" {...common} stroke={handsColor ?? color} />
         </>
       )}
+      {name === 'check' && <Path d="M5 12.5l4.5 4.5L19 7.5" {...common} />}
       {name === 'cards' && (
         <>
           <Rect x={4} y={7} width={13} height={13} rx={2} {...common} />

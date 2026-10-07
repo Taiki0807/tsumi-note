@@ -11,12 +11,14 @@ import {
 } from '@/features/timer/timer-logic';
 import { createTimerStorage } from '@/features/timer/timer-storage';
 
+import { loadTodayStats } from './load-today-stats';
 import { loadWeeklyRecord } from './load-weekly-record';
 import {
   addWeeks,
   buildWeeklyRecord,
   chartMaxHours,
   formatDiff,
+  formatFocusMinutes,
   formatWeekRange,
   splitDuration,
   startOfWeek,
@@ -230,5 +232,50 @@ describe('records from SQLite (Phase 2 → Phase 3)', () => {
     expect(only.record.diffSeconds / 60).toBe(-15);
 
     expect(repos.studySessions.listBetween(WEEK, addWeeks(WEEK, 1))).toHaveLength(2);
+  });
+});
+
+describe('today stats for the timer screen (shared aggregation)', () => {
+  function setup() {
+    const repos = createRepositories(createTestDeps().deps);
+    return { repos, storage: createTimerStorage(repos) };
+  }
+  const rec = (repos: ReturnType<typeof setup>['repos'], startedAt: number, minutes: number) =>
+    repos.studySessions.record({ folderId: null, startedAt, endedAt: startedAt + minutes * MIN });
+
+  it('is zero for an empty database', () => {
+    const { repos } = setup();
+    expect(loadTodayStats(repos, local(2026, 9, 8, 10))).toEqual({ seconds: 0, sessionCount: 0 });
+  });
+
+  it('reflects a finished focus saved by the timer, once, and is read back from SQLite', () => {
+    const { repos, storage } = setup();
+    const s = { ...DEFAULT_TIMER_SETTINGS, rounds: 1 };
+    const t0 = local(2026, 9, 8, 9);
+    const done = advance(start(createIdleState(s), s, t0, () => 'run-1'), t0 + 25 * MIN);
+    storage.recordCompletedFocus(done.completedFocus);
+    storage.recordCompletedFocus(done.completedFocus); // idempotent
+
+    // Values come from the stored rows only, so a relaunch reads exactly the same numbers.
+    expect(loadTodayStats(repos, t0 + 30 * MIN)).toEqual({ seconds: 25 * 60, sessionCount: 1 });
+    expect(loadTodayStats(repos, t0 + 600 * MIN)).toEqual({ seconds: 25 * 60, sessionCount: 1 });
+  });
+
+  it('starts a new aggregation when the local date changes', () => {
+    const { repos } = setup();
+    rec(repos, local(2026, 9, 8, 23, 30), 25);
+    rec(repos, local(2026, 9, 9, 0, 0), 10);
+    expect(loadTodayStats(repos, local(2026, 9, 8, 23, 59))).toEqual({ seconds: 25 * 60, sessionCount: 1 });
+    expect(loadTodayStats(repos, local(2026, 9, 9, 0, 1))).toEqual({ seconds: 10 * 60, sessionCount: 1 });
+  });
+
+  it('agrees with the weekly chart for the same day', () => {
+    const { repos } = setup();
+    rec(repos, local(2026, 9, 8, 9), 25);
+    rec(repos, local(2026, 9, 8, 12), 50);
+    const today = loadTodayStats(repos, local(2026, 9, 8, 20));
+    expect(loadWeeklyRecord(repos, WEEK).record.days[1]?.seconds).toBe(today.seconds);
+    expect(formatFocusMinutes(today.seconds)).toBe('75分');
+    expect(today.sessionCount).toBe(2);
   });
 });

@@ -34,6 +34,8 @@ export function useTimer() {
     return restored ?? createIdleState(storage.loadSettings());
   });
   const [now, setNow] = useState(() => Date.now());
+  /** Bumped whenever finished focus sessions were saved, so stats derived from SQLite reload. */
+  const [savedCount, setSavedCount] = useState(0);
   const stateRef = useRef(state);
 
   /** Applies a new state: persists it, keeps notifications in sync and saves finished focuses. */
@@ -52,7 +54,10 @@ export function useTimer() {
   const sync = useCallback(() => {
     const at = Date.now();
     const result = advance(stateRef.current, at);
-    if (result.completedFocus.length > 0) storage.recordCompletedFocus(result.completedFocus);
+    if (result.completedFocus.length > 0) {
+      storage.recordCompletedFocus(result.completedFocus);
+      setSavedCount((c) => c + 1);
+    }
     const last = result.events[result.events.length - 1];
     if (last) notifyHaptic(last);
     if (result.state !== stateRef.current) commit(result.state, at);
@@ -113,6 +118,7 @@ export function useTimer() {
   return {
     state,
     settings,
+    savedCount,
     remainingMs: getRemainingMs(state, now),
     progress: getProgress(state, now),
     onStart,

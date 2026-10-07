@@ -5,14 +5,57 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppIcon } from '@/components/app-icon';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
+import { formatFocusMinutes } from '@/features/records/records-logic';
+import { useTodayStats } from '@/features/records/use-today-stats';
 import { TimerRing } from '@/features/timer/timer-ring';
 import { TimerSettingsModal } from '@/features/timer/timer-settings-modal';
 import { useTimer } from '@/features/timer/use-timer';
+
+function StatCard({
+  tone,
+  label,
+  value,
+  icon,
+}: {
+  tone: 'success' | 'primary';
+  label: string;
+  value: string;
+  icon: 'clock' | 'check';
+}) {
+  const colors = useTheme();
+  const toneColor = tone === 'success' ? colors.success : colors.primary;
+  const toneText = tone === 'success' ? colors.successText : colors.primary;
+  const toneSoft = tone === 'success' ? colors.successSoft : colors.primarySoft;
+  return (
+    <View
+      style={{
+        flex: 1,
+        height: 80,
+        overflow: 'hidden',
+        borderRadius: radius.md,
+        borderWidth: 2,
+        borderColor: toneColor,
+        backgroundColor: colors.surface,
+      }}
+    >
+      <View style={{ height: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: toneSoft }}>
+        <Text style={{ fontFamily: fontFamily.extraBold, ...typography.caption, color: toneText }}>{label}</Text>
+      </View>
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        <Icon name={icon} size={20} color={toneColor} handsColor={colors.textPrimary} strokeWidth={1.83} />
+        <Text style={{ fontFamily: fontFamily.numeric, fontSize: 18, lineHeight: 28, color: colors.textPrimary }}>
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 export default function TimerScreen() {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const timer = useTimer();
+  const today = useTodayStats(timer.savedCount);
   const [showSettings, setShowSettings] = useState(false);
   // `state.settings` is the session snapshot; `settings` is the editable value for the next start.
   const { state, settings } = timer;
@@ -129,6 +172,12 @@ export default function TimerScreen() {
               </Text>
             </Pressable>
           ) : null}
+        </View>
+
+        {/* Today stats (Figma 192:126): two StatCards 165x80, gap 12, radius 12, 2pt tone border. */}
+        <View style={{ marginTop: 16, flexDirection: 'row', gap: 12 }}>
+          <StatCard tone="success" label="今日の集中" value={formatFocusMinutes(today.seconds)} icon="clock" />
+          <StatCard tone="primary" label="完了" value={`${today.sessionCount}セッション`} icon="check" />
         </View>
       </ScrollView>
 

@@ -58,7 +58,7 @@ export function addWeeks(weekStart: number, weeks: number): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + weeks * 7).getTime();
 }
 
-function addDays(dayStart: number, days: number): number {
+export function addDays(dayStart: number, days: number): number {
   const d = new Date(dayStart);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days).getTime();
 }
@@ -68,6 +68,20 @@ function inRange(sessions: SessionLike[], from: number, to: number, folderId?: s
   return sessions.filter(
     (s) => s.startedAt >= from && s.startedAt < to && (folderId === undefined || s.folderId === folderId),
   );
+}
+
+export type DaySummary = { seconds: number; sessionCount: number };
+
+/**
+ * Total focus time and session count of the local day starting at `dayStart`. The single day
+ * aggregation shared by the weekly chart and the timer screen's 「今日の集中」「完了」.
+ */
+export function summarizeDay(sessions: SessionLike[], dayStart: number, folderId?: string): DaySummary {
+  const inDay = inRange(sessions, dayStart, addDays(dayStart, 1), folderId);
+  return {
+    seconds: inDay.reduce((sum, s) => sum + s.durationSeconds, 0),
+    sessionCount: inDay.length,
+  };
 }
 
 export function buildWeeklyRecord(
@@ -86,12 +100,7 @@ export function buildWeeklyRecord(
     weekdayIndex: i,
     seconds: 0,
   }));
-  for (const s of current) {
-    const day = days.find(
-      (d, i) => s.startedAt >= d.dayStart && s.startedAt < (days[i + 1]?.dayStart ?? weekEnd),
-    );
-    if (day) day.seconds += s.durationSeconds;
-  }
+  for (const day of days) day.seconds = summarizeDay(current, day.dayStart).seconds;
 
   const totalSeconds = days.reduce((sum, d) => sum + d.seconds, 0);
   const previousTotalSeconds = previous.reduce((sum, s) => sum + s.durationSeconds, 0);
@@ -117,6 +126,11 @@ export function formatWeekRange(weekStart: number): string {
 export function splitDuration(seconds: number): { hours: number; minutes: number } {
   const totalMinutes = Math.floor(Math.max(0, seconds) / 60);
   return { hours: Math.floor(totalMinutes / 60), minutes: totalMinutes % 60 };
+}
+
+/** Timer stat card value, e.g. 「75分」 (minutes are rounded down, like the weekly total). */
+export function formatFocusMinutes(seconds: number): string {
+  return `${Math.floor(Math.max(0, seconds) / 60)}分`;
 }
 
 export type DiffChip = { kind: 'up' | 'down' | 'same'; label: string };
