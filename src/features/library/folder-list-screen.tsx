@@ -102,12 +102,13 @@ export function FolderListScreen({ header }: { header?: ReactNode } = {}) {
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
       <View
         style={{
-          height: 64,
           flexDirection: 'row',
           alignItems: 'center',
           gap: 12,
           paddingLeft: 24,
           paddingRight: 16,
+          paddingTop: 12,
+          paddingBottom: 8,
         }}
       >
         <AppIcon size={32} cornerRadius={50} />
@@ -128,27 +129,32 @@ export function FolderListScreen({ header }: { header?: ReactNode } = {}) {
           alignSelf: 'center',
           width: '100%',
           maxWidth: layout.contentMaxWidth,
-          gap: 14,
+          gap: 16,
           paddingTop: 8,
           paddingHorizontal: 24,
           paddingBottom: 24,
         }}
       >
         {header}
-        <SearchField
-          value={query}
-          onChangeText={setQuery}
-          placeholder="フォルダーを検索"
-        />
-        <View style={{ gap: 2 }}>
-          <Text
-            style={{ fontFamily: fontFamily.extraBold, ...typography.headingSm, color: colors.textPrimary }}
-          >
-            学びたい分野を選びましょう
-          </Text>
-          <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}>
-            {folders.length}フォルダー · {totalQuestions}問
-          </Text>
+        <View style={{ gap: 12, paddingTop: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text
+                style={{
+                  fontFamily: fontFamily.extraBold,
+                  ...typography.headingSm,
+                  color: colors.textPrimary,
+                }}
+              >
+                学びたい分野を選びましょう
+              </Text>
+              <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}>
+                {folders.length}フォルダー · {totalQuestions}問
+              </Text>
+            </View>
+            <Button label="＋ 作成" variant="secondary" size="sm" onPress={() => setCreating(true)} />
+          </View>
+          <SearchField height={44} value={query} onChangeText={setQuery} placeholder="フォルダーを検索" />
         </View>
         {folders.length === 0 && searching ? (
           <EmptyState
@@ -165,17 +171,6 @@ export function FolderListScreen({ header }: { header?: ReactNode } = {}) {
         ) : (
           folders.map((folder, index) => <FolderCard key={folder.id} folder={folder} index={index} />)
         )}
-        <Button label="＋ フォルダーを作成" variant="secondary" onPress={() => setCreating(true)} />
-        <Text
-          style={{
-            textAlign: 'center',
-            fontFamily: fontFamily.bold,
-            ...typography.caption,
-            color: colors.textSecondary,
-          }}
-        >
-          各フォルダーに問題を追加して学習できます
-        </Text>
       </ScrollView>
       <FolderFormSheet
         visible={creating}
