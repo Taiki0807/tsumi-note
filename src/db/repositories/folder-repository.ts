@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, isNull } from 'drizzle-orm';
 
 import { normalizeFolderName } from '../../domain/validation';
 import { folders, notes, questions } from '../schema';
@@ -35,6 +35,16 @@ export function createFolderRepository({ db, now, newId }: RepositoryDeps) {
         .from(folders)
         .where(and(eq(folders.id, id), isNull(folders.deletedAt)))
         .get();
+    },
+
+    /** Live notes that deleting the folder would detach (`folderId = null`). */
+    countNotes(id: string): number {
+      const row = db
+        .select({ n: count() })
+        .from(notes)
+        .where(and(eq(notes.folderId, id), isNull(notes.deletedAt)))
+        .get();
+      return row?.n ?? 0;
     },
 
     list(): Folder[] {

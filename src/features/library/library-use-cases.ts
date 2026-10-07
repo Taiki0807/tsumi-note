@@ -30,10 +30,23 @@ export function loadFolderDetail(
   return folder ? { folder, questions: questions.listByFolder(folderId) } : undefined;
 }
 
-/** Use case: what deleting a folder takes with it, for the confirmation message. */
+export type FolderDeletionImpact = { questionCount: number; noteCount: number };
+
+/** Use case: what deleting a folder does to its contents, for the confirmation message. */
 export function describeFolderDeletion(
-  { questions }: LibraryRepos,
+  { folders, questions }: LibraryRepos,
   folderId: string,
-): { questionCount: number } {
-  return { questionCount: questions.countByFolder(folderId) };
+): FolderDeletionImpact {
+  return { questionCount: questions.countByFolder(folderId), noteCount: folders.countNotes(folderId) };
+}
+
+/** Confirmation text that matches what `folders.softDelete` actually does. */
+export function folderDeletionMessage({ questionCount, noteCount }: FolderDeletionImpact): string {
+  const lines = [
+    questionCount > 0
+      ? `このフォルダー内の問題${questionCount}問も一緒に削除されます。`
+      : 'このフォルダーを削除します。',
+  ];
+  if (noteCount > 0) lines.push(`ノート${noteCount}件は削除されず、フォルダー未設定になります。`);
+  return lines.join('\n');
 }

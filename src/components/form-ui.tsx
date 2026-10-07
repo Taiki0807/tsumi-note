@@ -4,6 +4,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
@@ -179,6 +180,8 @@ export function BottomSheet({
               alignSelf: 'center',
               width: '100%',
               maxWidth: layout.contentMaxWidth,
+              // Leaves room above the sheet while the keyboard shrinks the container.
+              maxHeight: '92%',
               gap: 20,
               paddingTop: 12,
               paddingHorizontal: 24,
@@ -197,11 +200,25 @@ export function BottomSheet({
           {/* Enlarged drag target; negative margins keep the visual layout unchanged. */}
           <View
             {...panHandlers}
-            style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 12, marginTop: -12, marginBottom: -12 }}
+            style={{
+              alignItems: 'center',
+              paddingTop: 12,
+              paddingBottom: 12,
+              marginTop: -12,
+              marginBottom: -12,
+            }}
           >
             <View style={{ width: 40, height: 5, borderRadius: 3, backgroundColor: colors.border }} />
           </View>
-          {children}
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+            style={{ flexShrink: 1 }}
+            contentContainerStyle={{ gap: 20 }}
+          >
+            {children}
+          </ScrollView>
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>

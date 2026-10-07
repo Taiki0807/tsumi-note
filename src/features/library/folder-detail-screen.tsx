@@ -8,6 +8,7 @@ import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/desi
 import type { Question } from '@/db/repositories';
 
 import { FolderFormSheet } from './folder-form-sheet';
+import { folderDeletionMessage } from './library-use-cases';
 import { QuestionFormSheet } from './question-form-sheet';
 import { useFolderDetail } from './use-library';
 
@@ -79,24 +80,18 @@ export function FolderDetailScreen() {
   }
 
   const confirmDeleteFolder = () => {
-    const { questionCount } = folder.getDeletionImpact();
-    Alert.alert(
-      `「${detail.folder.name}」を削除しますか？`,
-      questionCount > 0
-        ? `このフォルダー内の問題${questionCount}問も一緒に削除されます。`
-        : 'このフォルダーを削除します。',
-      [
-        { text: 'キャンセル', style: 'cancel' },
-        {
-          text: '削除',
-          style: 'destructive',
-          onPress: () => {
-            folder.deleteFolder();
-            router.back();
-          },
+    const impact = folder.getDeletionImpact();
+    Alert.alert(`「${detail.folder.name}」を削除しますか？`, folderDeletionMessage(impact), [
+      { text: 'キャンセル', style: 'cancel' },
+      {
+        text: '削除',
+        style: 'destructive',
+        onPress: () => {
+          folder.deleteFolder();
+          router.back();
         },
-      ],
-    );
+      },
+    ]);
   };
 
   const openFolderMenu = () =>
