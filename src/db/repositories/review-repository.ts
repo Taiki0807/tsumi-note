@@ -234,9 +234,19 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
       fromInclusive: number,
       toExclusive: number,
       folderId?: string,
-    ): { result: 'correct' | 'incorrect' | 'timeout'; answeredAt: number }[] {
+    ): {
+      questionId: string;
+      prompt: string;
+      result: 'correct' | 'incorrect' | 'timeout';
+      answeredAt: number;
+    }[] {
       return db
-        .select({ result: answerHistory.result, answeredAt: answerHistory.answeredAt })
+        .select({
+          questionId: answerHistory.questionId,
+          prompt: questions.prompt,
+          result: answerHistory.result,
+          answeredAt: answerHistory.answeredAt,
+        })
         .from(answerHistory)
         .innerJoin(questions, eq(questions.id, answerHistory.questionId))
         .innerJoin(folders, eq(folders.id, questions.folderId))

@@ -7,6 +7,7 @@ import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 import { formatFocusMinutes } from '@/features/records/records-logic';
 import { useTodayStats } from '@/features/records/use-today-stats';
+import { FolderPickerSheet } from '@/features/timer/folder-picker-sheet';
 import { TimerRing } from '@/features/timer/timer-ring';
 import { TimerSettingsModal } from '@/features/timer/timer-settings-modal';
 import { useTimer } from '@/features/timer/use-timer';
@@ -60,6 +61,11 @@ export default function TimerScreen() {
   // `state.settings` is the session snapshot; `settings` is the editable value for the next start.
   const { state, settings } = timer;
   const { status } = state;
+  const [showFolders, setShowFolders] = useState(false);
+  // A run in progress shows (and keeps) the folder fixed at its start; otherwise the picker value.
+  const inRun = status === 'running' || status === 'paused';
+  const shownFolderId = inRun ? state.folderId : timer.selectedFolderId;
+  const currentFolderName = timer.folders.find((f) => f.id === shownFolderId)?.name ?? '未分類';
 
   const primary =
     status === 'running'
@@ -106,6 +112,44 @@ export default function TimerScreen() {
           maxWidth: layout.contentMaxWidth,
         }}
       >
+        {/* Selector row (Figma 192:127): 342x40 centred; Folder selector 192:88 = pill, primarySoft,
+            padding 16/14, gap 6, folder 18 + name 15/800 primary + chevron 16. */}
+        <View style={{ marginTop: 8, height: 40, alignItems: 'center', justifyContent: 'center' }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`フォルダー ${currentFolderName}`}
+            disabled={inRun}
+            accessibilityState={{ disabled: inRun }}
+            onPress={() => setShowFolders(true)}
+            style={{
+              height: 40,
+              maxWidth: '100%',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingLeft: 16,
+              paddingRight: 14,
+              borderRadius: radius.full,
+              backgroundColor: colors.primarySoft,
+            }}
+          >
+            <Icon name="folder" size={18} color={colors.primary} />
+            <Text
+              numberOfLines={1}
+              style={{
+                flexShrink: 1,
+                fontFamily: fontFamily.extraBold,
+                fontSize: 15,
+                lineHeight: 24,
+                color: colors.primary,
+              }}
+            >
+              {currentFolderName}
+            </Text>
+            <Icon name="chevron-down" size={16} color={colors.primary} />
+          </Pressable>
+        </View>
+
         <View
           style={{
             marginTop: 16,
@@ -181,6 +225,13 @@ export default function TimerScreen() {
         </View>
       </ScrollView>
 
+      <FolderPickerSheet
+        visible={showFolders}
+        folders={timer.folders}
+        selectedId={timer.selectedFolderId}
+        onSelect={timer.selectFolder}
+        onClose={() => setShowFolders(false)}
+      />
       <TimerSettingsModal
         visible={showSettings}
         settings={settings}

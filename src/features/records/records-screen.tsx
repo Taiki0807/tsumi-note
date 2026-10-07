@@ -10,6 +10,7 @@ import {
   formatDayLabel,
   formatCorrectRate,
   formatDiff,
+  formatNeedsReviewDetail,
   formatShortWeekRange,
   formatWeekRange,
   splitDuration,
@@ -205,6 +206,7 @@ export function RecordsScreen() {
         : { bg: colors.successSoft, fg: colors.successText, icon: 'arrow-up' as const };
   const folders = view?.folders ?? [];
   const understanding = view?.understanding;
+  const needsReview = view?.needsReview ?? null;
   const selectedFolderName = folders.find((f) => f.id === folderId)?.name ?? 'すべて';
 
   const numeric = {
@@ -457,6 +459,56 @@ export function RecordsScreen() {
               >
                 この週の復習記録はまだありません
               </Text>
+            )}
+            {needsReview && (
+              <View
+                accessibilityLabel={`今週の要復習 ${needsReview.prompt} ${formatNeedsReviewDetail(needsReview)}`}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  backgroundColor: colors.warningSoft,
+                }}
+              >
+                <View
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: colors.warning,
+                  }}
+                >
+                  <Icon name="flame" size={20} color={colors.textOnPrimary} />
+                </View>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text
+                    style={{
+                      fontFamily: fontFamily.extraBold,
+                      fontSize: 12,
+                      lineHeight: 16,
+                      color: colors.warningText,
+                    }}
+                  >
+                    {isCurrentWeek ? '今週の要復習' : 'この週の要復習'}
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily: fontFamily.extraBold,
+                      fontSize: 15,
+                      lineHeight: 24,
+                      color: colors.textPrimary,
+                    }}
+                  >
+                    {`${needsReview.prompt} · ${formatNeedsReviewDetail(needsReview)}`}
+                  </Text>
+                </View>
+              </View>
             )}
           </View>
         )}

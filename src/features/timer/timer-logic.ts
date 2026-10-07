@@ -35,6 +35,11 @@ export type TimerState = {
    * across relaunch, so completing it twice maps to the same study_sessions row.
    */
   sessionId: string | null;
+  /**
+   * Folder chosen when the run started (null = unclassified). Part of the run's snapshot, like
+   * `settings`: changing the picker for the next run never alters a run in progress.
+   */
+  folderId: string | null;
   /** Epoch ms when the current focus session actually began. Never changed by pause / resume. */
   focusStartedAt: number | null;
   /** Epoch ms when the current phase ends. Only meaningful while `running`. */
@@ -49,6 +54,8 @@ export type TimerEvent = 'focusEnd' | 'breakEnd' | 'allDone';
 export type CompletedFocus = {
   /** Idempotency key: becomes the study_sessions primary key. */
   sessionId: string;
+  /** Folder fixed at run start; null = unclassified. */
+  folderId: string | null;
   /** Actual wall-clock start / end. They include time spent paused. */
   startedAt: number;
   endedAt: number;
@@ -85,6 +92,7 @@ export function createIdleState(settings: TimerSettings): TimerState {
     settings,
     runId: null,
     sessionId: null,
+    folderId: null,
     focusStartedAt: null,
     targetEndAt: null,
     remainingMs: phaseDurationMs(settings, 'focus'),
@@ -101,6 +109,7 @@ export function start(
   settings: TimerSettings,
   now: number,
   newId: () => string,
+  folderId: string | null = null,
 ): TimerState {
   if (state.status === 'running' || state.status === 'paused') return state;
   const fresh = createIdleState(settings);
@@ -109,6 +118,7 @@ export function start(
     ...fresh,
     status: 'running',
     runId,
+    folderId,
     sessionId: focusSessionId(runId, 1),
     focusStartedAt: now,
     targetEndAt: now + fresh.remainingMs,
@@ -154,6 +164,7 @@ export function advance(state: TimerState, now: number): AdvanceResult {
       if (current.sessionId !== null && current.focusStartedAt !== null) {
         completedFocus.push({
           sessionId: current.sessionId,
+          folderId: current.folderId ?? null,
           startedAt: current.focusStartedAt,
           endedAt,
           durationSeconds: Math.round(phaseDurationMs(settings, 'focus') / 1000),
@@ -251,7 +262,9 @@ export function parseStoredState(raw: string | undefined): TimerState | null {
         if (typeof v.sessionId !== 'string' || !Number.isFinite(v.focusStartedAt)) return null;
       }
     }
-    return { ...v, settings: clampSettings(v.settings) };
+    // States stored before the folder link existed have no folderId: treat as unclassified.
+    const folderId = typeof v.folderId === 'string' && v.folderId !== '' ? v.folderId : null;
+    return { ...v, folderId, settings: clampSettings(v.settings) };
   } catch {
     return null;
   }

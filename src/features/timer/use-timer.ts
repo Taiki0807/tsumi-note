@@ -1,4 +1,5 @@
 import { randomUUID } from 'expo-crypto';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
@@ -34,6 +35,12 @@ export function useTimer() {
     return restored ?? createIdleState(storage.loadSettings());
   });
   const [now, setNow] = useState(() => Date.now());
+  /** Picker value for the NEXT run. A run in progress keeps `state.folderId` (snapshot at start). */
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() =>
+    storage.loadSelectedFolderId(),
+  );
+  const [folders, setFolders] = useState(() => storage.listFolders());
+  const selectedRef = useRef(selectedFolderId);
   /** Bumped whenever finished focus sessions were saved, so stats derived from SQLite reload. */
   const [savedCount, setSavedCount] = useState(0);
   const stateRef = useRef(state);
@@ -87,9 +94,28 @@ export function useTimer() {
     void ensureNotificationPermission().then(() => {
       // Permission is asked first; scheduling happens in commit and is skipped if denied.
       const at = Date.now();
-      commit(start(stateRef.current, settings, at, randomUUID), at);
+      // The folder is fixed here: later picker changes only affect the next run.
+      commit(start(stateRef.current, settings, at, randomUUID, selectedRef.current), at);
     });
   }, [commit, settings]);
+
+  /** Re-reads live folders (a folder created / deleted elsewhere shows up without a restart). */
+  const refreshFolders = useCallback(() => {
+    setFolders(storage.listFolders());
+    const id = storage.loadSelectedFolderId();
+    selectedRef.current = id;
+    setSelectedFolderId(id);
+  }, [storage]);
+  useFocusEffect(refreshFolders);
+
+  const selectFolder = useCallback(
+    (folderId: string | null) => {
+      storage.saveSelectedFolderId(folderId);
+      selectedRef.current = folderId;
+      setSelectedFolderId(folderId);
+    },
+    [storage],
+  );
 
   const onPause = useCallback(() => {
     const at = Date.now();
@@ -119,6 +145,9 @@ export function useTimer() {
     state,
     settings,
     savedCount,
+    folders,
+    selectedFolderId,
+    selectFolder,
     remainingMs: getRemainingMs(state, now),
     progress: getProgress(state, now),
     onStart,

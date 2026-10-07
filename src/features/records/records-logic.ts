@@ -145,6 +145,57 @@ export function buildUnderstanding(answers: AnswerLike[], weekStart: number): Un
   };
 }
 
+export type NeedsReview = {
+  questionId: string;
+  prompt: string;
+  incorrectCount: number;
+  /** All answers of the question in the week (correct + incorrect + timeout). */
+  attemptCount: number;
+  /** incorrectCount / attemptCount in 0..1. */
+  incorrectRate: number;
+};
+
+type QuestionAnswerLike = AnswerLike & { questionId: string; prompt: string };
+
+/**
+ * 「今週の要復習」 (Figma 02 › Needs review): the question with the highest error rate in the week
+ * (same week as the study time). Incorrect = result 'incorrect' (timeouts are separate but stay in
+ * the denominator, like 問題管理's 誤答率). Ties: more incorrect answers, then more attempts, then
+ * the question id. Questions without any incorrect answer are not listed; no data → null.
+ */
+export function buildNeedsReview(answers: QuestionAnswerLike[], weekStart: number): NeedsReview | null {
+  const weekEnd = addWeeks(weekStart, 1);
+  const byQuestion = new Map<string, NeedsReview>();
+  for (const a of answers) {
+    if (a.answeredAt < weekStart || a.answeredAt >= weekEnd) continue;
+    const row = byQuestion.get(a.questionId) ?? {
+      questionId: a.questionId,
+      prompt: a.prompt,
+      incorrectCount: 0,
+      attemptCount: 0,
+      incorrectRate: 0,
+    };
+    row.attemptCount += 1;
+    if (a.result === 'incorrect') row.incorrectCount += 1;
+    row.incorrectRate = row.incorrectCount / row.attemptCount;
+    byQuestion.set(a.questionId, row);
+  }
+  const candidates = [...byQuestion.values()].filter((r) => r.incorrectCount > 0);
+  candidates.sort(
+    (a, b) =>
+      b.incorrectRate - a.incorrectRate ||
+      b.incorrectCount - a.incorrectCount ||
+      b.attemptCount - a.attemptCount ||
+      a.questionId.localeCompare(b.questionId),
+  );
+  return candidates[0] ?? null;
+}
+
+/** e.g. 「誤答率 75%（6 / 8回）」. */
+export function formatNeedsReviewDetail(r: NeedsReview): string {
+  return `誤答率 ${Math.round(r.incorrectRate * 100)}%（${r.incorrectCount} / ${r.attemptCount}回）`;
+}
+
 /** e.g. 「75%」 (rounded to the nearest percent); no answers → 「—」. */
 export function formatCorrectRate(rate: number | null): string {
   return rate === null ? '—' : `${Math.round(rate * 100)}%`;
