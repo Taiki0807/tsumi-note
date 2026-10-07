@@ -65,7 +65,7 @@ function Inline({ nodes }: { nodes: InlineNode[] }) {
  * (so it survives restarts and container moves); web URLs are shown as-is. A missing file shows a
  * quiet placeholder instead of breaking the note.
  */
-function NoteImage({ alt, reference }: { alt: string; reference: string }) {
+export function NoteImage({ alt, reference }: { alt: string; reference: string }) {
   const colors = useTheme();
   const [failed, setFailed] = useState(false);
   const fileName = parseImageRef(reference);

@@ -1,4 +1,42 @@
-import { insertSnippet, parseInline, parseMarkdown, toggleChecklistLine, toggleLinePrefix } from './markdown';
+import {
+  insertSnippet,
+  parseInline,
+  parseMarkdown,
+  removeSegmentLine,
+  splitEditorSegments,
+  toggleChecklistLine,
+  toggleLinePrefix,
+} from './markdown';
+
+describe('splitEditorSegments (editor shows images, not their Markdown)', () => {
+  const image = '![画像](note-image://abc.png)';
+
+  it('splits text around an image line and rebuilds the same body', () => {
+    const body = `前\n\n${image}\n\n後`;
+    const segments = splitEditorSegments(body);
+    expect(segments.map((s) => s.type)).toEqual(['text', 'image', 'text']);
+    expect(segments[1]).toMatchObject({ alt: '画像', ref: 'note-image://abc.png' });
+    expect(segments.map((s) => body.slice(s.start, s.end)).join('\n')).toBe(body);
+  });
+
+  it('supports multiple images and a trailing editable segment', () => {
+    const types = splitEditorSegments(`${image}\n\n![画像](note-image://def.jpg)\n`).map((s) => s.type);
+    expect(types.filter((t) => t === 'image')).toHaveLength(2);
+    expect(types[types.length - 1]).toBe('text');
+  });
+
+  it('keeps image-looking lines inside code fences as text', () => {
+    const segments = splitEditorSegments(`\`\`\`\n${image}\n\`\`\``);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]?.type).toBe('text');
+  });
+
+  it('removes an image line without touching the rest', () => {
+    const body = `前\n${image}\n後`;
+    const seg = splitEditorSegments(body)[1];
+    expect(seg && removeSegmentLine(body, seg.start, seg.end)).toBe('前\n後');
+  });
+});
 
 describe('parseMarkdown', () => {
   it('parses headings, lists, checklists, quotes, links and code', () => {

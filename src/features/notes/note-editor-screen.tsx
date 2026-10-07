@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, EmptyState, IconButton } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, typography, useTheme } from '@/design';
-import { toggleChecklistLine } from '@/domain/markdown';
+import { removeSegmentLine, splitEditorSegments, toggleChecklistLine } from '@/domain/markdown';
 import {
   applyBlock,
   currentHeadingLevel,
@@ -31,7 +31,7 @@ import {
 } from '@/domain/markdown-format';
 import { FolderPickerSheet } from '@/features/timer/folder-picker-sheet';
 
-import { MarkdownView } from './markdown-view';
+import { MarkdownView, NoteImage } from './markdown-view';
 import { formatNoteTime, noteDisplayTitle } from './note-format';
 import { OptionSheet, type SheetOption } from './option-sheet';
 import { useNoteEditor } from './use-notes';
@@ -125,8 +125,13 @@ export function NoteEditorScreen() {
   const [sheet, setSheet] = useState<SheetName | null>(null);
   const [headingLevel, setHeadingLevel] = useState<number | undefined>(undefined);
   const selection = useRef<Selection>({ start: body.length, end: body.length });
-  const [sel, setSel] = useState<Selection | undefined>(undefined);
-  const bodyInput = useRef<TextInput>(null);
+  // Selection to push into one text segment (index + range local to that segment).
+  const [sel, setSel] = useState<{ seg: number; range: Selection } | undefined>(undefined);
+  const segmentInputs = useRef<(TextInput | null)[]>([]);
+  // Images are shown as images while editing; the Markdown body stays the only stored content.
+  const segments = splitEditorSegments(body);
+  const focusSegment = (index: number | undefined) =>
+    setTimeout(() => segmentInputs.current[index ?? 0]?.focus(), 0);
 
   // Everything the debounced / unmount save needs lives in refs so it never sees stale state.
   const noteId = useRef<string | undefined>(routeId);
@@ -176,15 +181,31 @@ export function NoteEditorScreen() {
   const applyEdit = (edit: FormatEdit) => {
     selection.current = edit.selection;
     updateBody(edit.text);
-    setSel(edit.selection);
-    bodyInput.current?.focus();
+    const next = splitEditorSegments(edit.text);
+    let index = next.findIndex(
+      (s) => s.type === 'text' && edit.selection.start >= s.start && edit.selection.end <= s.end,
+    );
+    if (index < 0) index = next.findIndex((s) => s.type === 'text');
+    const target = next[index];
+    if (target) {
+      setSel({
+        seg: index,
+        range: {
+          start: Math.max(0, edit.selection.start - target.start),
+          end: Math.max(0, edit.selection.end - target.start),
+        },
+      });
+    }
+    focusSegment(index);
   };
   const inline = (marker: InlineMarker) => applyEdit(toggleInline(body, selection.current, marker));
 
   const addImage = async () => {
+    // The caret at the moment the button was pressed; the body is read after the picker returns.
+    const caret = selection.current;
     try {
       const image = await editor.attachImage();
-      if (image) applyEdit(insertImage(body, selection.current, image.ref, image.alt));
+      if (image) applyEdit(insertImage(latest.current.body, caret, image.ref, image.alt));
     } catch {
       Alert.alert('画像を追加できませんでした', 'もう一度お試しください');
     }
@@ -318,7 +339,7 @@ export function NoteEditorScreen() {
             submitBehavior="submit"
             onSubmitEditing={() => {
               setEditingBody(true);
-              bodyInput.current?.focus();
+              focusSegment(0);
             }}
             style={{
               padding: 0,
@@ -358,36 +379,77 @@ export function NoteEditorScreen() {
           </View>
         </View>
         {editingBody ? (
-          <TextInput
-            ref={bodyInput}
-            accessibilityLabel="Markdown本文"
-            value={body}
-            onChangeText={updateBody}
-            selection={sel}
-            onSelectionChange={(e) => {
-              selection.current = e.nativeEvent.selection;
-              setSel(e.nativeEvent.selection);
-            }}
-            placeholder="本文を書く"
-            placeholderTextColor={colors.textPlaceholder}
-            multiline
-            autoFocus={body !== '' || title !== ''}
-            textAlignVertical="top"
-            autoCapitalize="none"
-            style={{
-              minHeight: 240,
-              padding: 0,
-              fontFamily: fontFamily.regular,
-              ...typography.body,
-              color: colors.textPrimary,
-            }}
-          />
+          <View style={{ gap: 10 }}>
+            {segments.map((segment, i) =>
+              segment.type === 'image' ? (
+                <View key={`image-${i}`}>
+                  <NoteImage alt={segment.alt} reference={segment.ref} />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="画像を削除"
+                    onPress={() => {
+                      const next = removeSegmentLine(body, segment.start, segment.end);
+                      selection.current = { start: segment.start, end: segment.start };
+                      updateBody(next);
+                    }}
+                    style={{
+                      position: 'absolute',
+                      top: 8,
+                      right: 8,
+                      width: 32,
+                      height: 32,
+                      borderRadius: radius.full,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: colors.surface,
+                    }}
+                  >
+                    <Icon name="close" size={16} color={colors.textPrimary} strokeWidth={1.8} />
+                  </Pressable>
+                </View>
+              ) : (
+                <TextInput
+                  key={`text-${i}`}
+                  ref={(node) => {
+                    segmentInputs.current[i] = node;
+                  }}
+                  accessibilityLabel="Markdown本文"
+                  value={segment.text}
+                  onChangeText={(value) =>
+                    updateBody(body.slice(0, segment.start) + value + body.slice(segment.end))
+                  }
+                  selection={sel?.seg === i ? sel.range : undefined}
+                  onSelectionChange={(e) => {
+                    const range = e.nativeEvent.selection;
+                    selection.current = {
+                      start: segment.start + range.start,
+                      end: segment.start + range.end,
+                    };
+                    setSel({ seg: i, range });
+                  }}
+                  placeholder={segments.length === 1 ? '本文を書く' : undefined}
+                  placeholderTextColor={colors.textPlaceholder}
+                  multiline
+                  autoFocus={i === 0 && (body !== '' || title !== '')}
+                  textAlignVertical="top"
+                  autoCapitalize="none"
+                  style={{
+                    minHeight: i === segments.length - 1 ? (segments.length === 1 ? 240 : 120) : 24,
+                    padding: 0,
+                    fontFamily: fontFamily.regular,
+                    ...typography.body,
+                    color: colors.textPrimary,
+                  }}
+                />
+              ),
+            )}
+          </View>
         ) : (
           <Pressable
             accessibilityLabel="本文を編集"
             onPress={() => {
               setEditingBody(true);
-              setTimeout(() => bodyInput.current?.focus(), 0);
+              focusSegment(splitEditorSegments(body).length - 1);
             }}
             style={{ minHeight: 240 }}
           >

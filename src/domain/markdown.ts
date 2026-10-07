@@ -59,6 +59,61 @@ const FENCE = /^\s*```/;
 /** An image on a line of its own: `![alt](ref)`. */
 const IMAGE = /^\s*!\[([^\]\n]*)\]\(([^)\s]+)\)\s*$/;
 
+/**
+ * One piece of the editor view of a note. `start`/`end` are offsets into the Markdown source:
+ * a text segment covers its lines without the trailing newline; an image segment covers its line.
+ * Segments are separated by exactly one `\n` in the source, so the body is always
+ * `segments.map(source slice).join('\n')` and the Markdown stays the only source of truth.
+ */
+export type EditorSegment =
+  | { type: 'text'; start: number; end: number; text: string }
+  | { type: 'image'; start: number; end: number; alt: string; ref: string };
+
+/**
+ * Splits a Markdown body into editable text runs and standalone image lines (images inside fenced
+ * code stay text). Used to show images in the editor instead of their `![](…)` source.
+ */
+export function splitEditorSegments(source: string): EditorSegment[] {
+  const segments: EditorSegment[] = [];
+  let run: { start: number; lines: string[] } | undefined;
+  let offset = 0;
+  let inFence = false;
+
+  const flushRun = () => {
+    if (!run) return;
+    const text = run.lines.join('\n');
+    segments.push({ type: 'text', start: run.start, end: run.start + text.length, text });
+    run = undefined;
+  };
+
+  for (const line of source.split('\n')) {
+    if (FENCE.test(line)) inFence = !inFence;
+    const image = inFence ? null : IMAGE.exec(line);
+    if (image) {
+      flushRun();
+      segments.push({
+        type: 'image',
+        start: offset,
+        end: offset + line.length,
+        alt: image[1] ?? '',
+        ref: image[2] ?? '',
+      });
+    } else {
+      run ??= { start: offset, lines: [] };
+      run.lines.push(line);
+    }
+    offset += line.length + 1;
+  }
+  flushRun();
+  return segments;
+}
+
+/** Removes the source line `[start, end]` of an image segment (plus one newline). */
+export function removeSegmentLine(source: string, start: number, end: number): string {
+  const tail = source.startsWith('\n', end) ? end + 1 : end;
+  return source.slice(0, start) + source.slice(tail);
+}
+
 export function parseMarkdown(source: string): MarkdownBlock[] {
   const lines = source.split(/\r\n|\r|\n/);
   const blocks: MarkdownBlock[] = [];
