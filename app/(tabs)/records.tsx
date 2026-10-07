@@ -1,5 +1,3 @@
-import { PlaceholderScreen } from '@/components/placeholder-screen';
+import { RecordsScreen } from '@/features/records/records-screen';
 
-export default function RecordsScreen() {
-  return <PlaceholderScreen title="記録" phase={3} />;
-}
+export default RecordsScreen;

@@ -1,4 +1,4 @@
-import { desc, eq, gte } from 'drizzle-orm';
+import { and, desc, eq, gte, lt } from 'drizzle-orm';
 
 import { studySessions } from '../schema';
 import type { RepositoryDeps } from '../types';
@@ -41,6 +41,16 @@ export function createStudySessionRepository({ db, now, newId }: RepositoryDeps)
         .select()
         .from(studySessions)
         .where(gte(studySessions.startedAt, startedAtOrAfter))
+        .orderBy(desc(studySessions.startedAt))
+        .all();
+    },
+
+    /** Sessions whose `startedAt` is in [fromInclusive, toExclusive), newest first. */
+    listBetween(fromInclusive: number, toExclusive: number): StudySession[] {
+      return db
+        .select()
+        .from(studySessions)
+        .where(and(gte(studySessions.startedAt, fromInclusive), lt(studySessions.startedAt, toExclusive)))
         .orderBy(desc(studySessions.startedAt))
         .all();
     },
