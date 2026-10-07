@@ -193,7 +193,15 @@ function Flashcard({ state }: { state: ActiveSession }) {
 }
 
 /** Figma 10 › Rate/*: 2x2 grid of 166x56 buttons, 10pt gap, 2pt border, radius 16. */
-function RatingGrid({ onRate, disabled }: { onRate: (rating: ReviewRating) => void; disabled: boolean }) {
+function RatingGrid({
+  onRate,
+  disabled,
+  intervals,
+}: {
+  onRate: (rating: ReviewRating) => void;
+  disabled: boolean;
+  intervals: Record<ReviewRating, string> | null;
+}) {
   const colors = useTheme();
   const options = ratingStyles(colors);
   return (
@@ -204,7 +212,7 @@ function RatingGrid({ onRate, disabled }: { onRate: (rating: ReviewRating) => vo
             <Pressable
               key={o.rating}
               accessibilityRole="button"
-              accessibilityLabel={o.label}
+              accessibilityLabel={intervals ? `${o.label}、次回まで${intervals[o.rating]}` : o.label}
               accessibilityState={{ disabled }}
               disabled={disabled}
               onPress={() => onRate(o.rating)}
@@ -223,6 +231,11 @@ function RatingGrid({ onRate, disabled }: { onRate: (rating: ReviewRating) => vo
               <Text style={{ fontFamily: fontFamily.extraBold, ...typography.button, color: o.fg }}>
                 {o.label}
               </Text>
+              {intervals ? (
+                <Text style={{ fontFamily: fontFamily.bold, fontSize: 11, lineHeight: 14, color: o.fg }}>
+                  {intervals[o.rating]}
+                </Text>
+              ) : null}
             </Pressable>
           ))}
         </View>
@@ -252,7 +265,7 @@ function Question({ session, state }: { session: Session; state: ActiveSession }
           <Text style={{ fontFamily: fontFamily.extraBold, ...typography.button, color: colors.textPrimary }}>
             どのくらい覚えていましたか？
           </Text>
-          <RatingGrid onRate={session.rate} disabled={session.saving} />
+          <RatingGrid onRate={session.rate} disabled={session.saving} intervals={session.intervals} />
           {session.error ? (
             <Text
               accessibilityRole="alert"

@@ -6,6 +6,7 @@ import {
   type ReviewSettings,
 } from '@/domain/review-settings';
 import type { ReviewRating } from '@/domain/fsrs';
+import { formatInterval } from '@/domain/review-interval';
 import { loadFolderDetail } from '@/features/library/library-use-cases';
 import type { QuestionFilter } from '@/features/library/question-list';
 
@@ -87,15 +88,41 @@ export function selectFolderViewItems(
   return toSessionItems(repos.review.listByIds(detail.rows.map((r) => r.question.id)), now);
 }
 
+export type RatingPreview = {
+  /** The time the candidates were computed at; pass it to `submitRating` as `reviewedAt`. */
+  at: number;
+  /** Time until the next due for each rating, e.g. "10分". */
+  intervals: Record<ReviewRating, string>;
+};
+
+/**
+ * Use case: next-review interval for each of the four ratings (shown on the rating buttons).
+ * Read-only. `null` for a voluntary review (its schedule is not updated, so there is nothing to
+ * promise) or when the question is gone.
+ */
+export function previewRatings(repos: ReviewRepos, session: ActiveSession, at: number): RatingPreview | null {
+  const item = session.items[session.index]!;
+  if (item.voluntary) return null;
+  const next = repos.review.previewRatings(item.questionId, at);
+  if (!next) return null;
+  const label = (rating: ReviewRating) => formatInterval(next[rating].dueAt - at);
+  return {
+    at,
+    intervals: { again: label('again'), hard: label('hard'), good: label('good'), easy: label('easy') },
+  };
+}
+
 /**
  * Use case: rate the current question. Persists FSRS state + history in one transaction and
  * returns the outcome to show in the summary, or `null` when the question no longer exists.
+ * `reviewedAt` = the preview time, so the stored due matches what the button showed.
  */
 export function submitRating(
   repos: ReviewRepos,
   session: ActiveSession,
   rating: ReviewRating,
   now: number,
+  reviewedAt?: number,
 ): SessionOutcome | null {
   const item = session.items[session.index]!;
   const result = repos.review.applyRating({
@@ -105,6 +132,7 @@ export function submitRating(
     timedOut: session.timedOut,
     elapsedMs: session.elapsedMs,
     keepSchedule: item.voluntary,
+    reviewedAt,
   });
   if (result.status === 'question-missing') return null;
   // A duplicate means this attempt was already stored (double tap): reuse the stored schedule.

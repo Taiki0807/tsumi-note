@@ -1,5 +1,6 @@
 import type { DueQuestion } from '@/db/repositories';
 import type { ReviewRating } from '@/domain/fsrs';
+import { formatInterval } from '@/domain/review-interval';
 import type { ReviewSettings } from '@/domain/review-settings';
 
 /**
@@ -186,12 +187,8 @@ export function summarize(outcomes: SessionOutcome[]): SessionSummary {
 
 /** "10分後" / "3時間後" / "5日後" relative to `now`; "まもなく" when already due. */
 export function formatNextDue(dueAt: number, now: number): string {
-  const minutes = Math.round((dueAt - now) / 60_000);
-  if (minutes < 1) return 'まもなく';
-  if (minutes < 60) return `${minutes}分後`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}時間後`;
-  return `${Math.round(hours / 24)}日後`;
+  if (Math.round((dueAt - now) / 60_000) < 1) return 'まもなく';
+  return `${formatInterval(dueAt - now)}後`;
 }
 
 /** mm:ss for the countdown (rounded up so 0:00 only shows at the deadline). */

@@ -102,6 +102,19 @@ export function scheduleReview(card: FsrsCardState, rating: ReviewRating, nowMs:
   };
 }
 
+/**
+ * The four possible outcomes at `nowMs`, computed with the very same `scheduleReview` that
+ * `applyRating` uses when saving, so a previewed due is exactly the one stored. Pure: no I/O.
+ */
+export function previewReviews(card: FsrsCardState, nowMs: number): Record<ReviewRating, ScheduledReview> {
+  return {
+    again: scheduleReview(card, 'again', nowMs),
+    hard: scheduleReview(card, 'hard', nowMs),
+    good: scheduleReview(card, 'good', nowMs),
+    easy: scheduleReview(card, 'easy', nowMs),
+  };
+}
+
 /** A card is due when its due time has been reached (inclusive). */
 export function isDue(dueAt: number, nowMs: number): boolean {
   return dueAt <= nowMs;

@@ -19,10 +19,12 @@ import {
 import {
   loadReviewOverview,
   loadReviewSettings,
+  previewRatings,
   saveReviewSettings,
   selectFolderViewItems,
   selectSessionItems,
   submitRating,
+  type RatingPreview,
   type ReviewOverview,
 } from './review-use-cases';
 import type { ReviewSettings } from '@/domain/review-settings';
@@ -58,10 +60,27 @@ export function useReviewSession() {
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
 
-  const setState = useCallback((next: ReviewSessionState) => {
-    stateRef.current = next;
-    setStateRaw(next);
-  }, []);
+  /**
+   * Next-review candidates of the current question, computed once when its answer appears
+   * (read-only; nothing is saved). `previewRef` keeps the same value for `rate`.
+   */
+  const [preview, setPreview] = useState<RatingPreview | null>(null);
+  const previewRef = useRef<RatingPreview | null>(null);
+
+  const setState = useCallback(
+    (next: ReviewSessionState) => {
+      const prev = stateRef.current;
+      if (!canRate(next)) {
+        previewRef.current = null;
+      } else if (!canRate(prev) || prev.attemptId !== next.attemptId) {
+        previewRef.current = previewRatings(repos, next, Date.now());
+      }
+      setPreview(previewRef.current);
+      stateRef.current = next;
+      setStateRaw(next);
+    },
+    [repos],
+  );
 
   /** Recomputes from the wall clock; used by the ticker and foreground return. */
   const sync = useCallback(() => {
@@ -113,7 +132,7 @@ export function useReviewSession() {
       setSaving(true);
       try {
         const at = Date.now();
-        const outcome = submitRating(repos, current, rating, at);
+        const outcome = submitRating(repos, current, rating, at, previewRef.current?.at);
         setError(null);
         setNow(at);
         setState(advance(current, outcome, at, randomUUID));
@@ -139,6 +158,8 @@ export function useReviewSession() {
     now,
     saving,
     error,
+    /** Interval text per rating, or `null` (not shown) for voluntary reviews. */
+    intervals: preview?.intervals ?? null,
     start,
     showAnswer,
     rate,

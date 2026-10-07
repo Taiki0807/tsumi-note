@@ -1,6 +1,12 @@
 import { and, asc, count, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 
-import { newCardState, scheduleReview, type FsrsCardState, type ReviewRating } from '../../domain/fsrs';
+import {
+  newCardState,
+  previewReviews,
+  scheduleReview,
+  type FsrsCardState,
+  type ReviewRating,
+} from '../../domain/fsrs';
 import { answerHistory, folders, fsrsStates, questions, reviewHistory } from '../schema';
 import type { RepositoryDeps } from '../types';
 import type { Question } from './question-repository';
@@ -30,6 +36,11 @@ export type ApplyRatingInput = {
    * left as is. PRODUCT_SPEC does not define this case, so the normal schedule is protected.
    */
   keepSchedule?: boolean;
+  /**
+   * The time the schedule is computed at. Pass the time used for `previewRatings` so the stored
+   * due equals the previewed one. Defaults to the current time.
+   */
+  reviewedAt?: number;
 };
 
 export type ApplyRatingResult =
@@ -141,6 +152,29 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
       }));
     },
 
+    /**
+     * Read-only: the four possible next states of a question at `at` (the same `scheduleReview`
+     * that `applyRating` runs). Writes nothing. `undefined` when the question does not exist.
+     */
+    previewRatings(questionId: string, at: number): Record<ReviewRating, FsrsCardState> | undefined {
+      const question = db
+        .select({ createdAt: questions.createdAt })
+        .from(questions)
+        .innerJoin(folders, eq(folders.id, questions.folderId))
+        .where(and(eq(questions.id, questionId), liveQuestion))
+        .get();
+      if (!question) return undefined;
+      const row = db.select().from(fsrsStates).where(eq(fsrsStates.questionId, questionId)).get();
+      const card = row ? rowToCard(row) : newCardState(question.createdAt);
+      const preview = previewReviews(card, at);
+      return {
+        again: preview.again.next,
+        hard: preview.hard.next,
+        good: preview.good.next,
+        easy: preview.easy.next,
+      };
+    },
+
     countDue(at: number = now(), folderId?: string): number {
       return (
         db
@@ -249,7 +283,7 @@ export function createReviewRepository({ db, now }: RepositoryDeps) {
           .get();
         if (!question) return { status: 'question-missing' };
 
-        const reviewedAt = now();
+        const reviewedAt = input.reviewedAt ?? now();
         const before = current ? rowToCard(current) : newCardState(question.createdAt);
         const { next, before: snapshot } = scheduleReview(before, input.rating, reviewedAt);
 
