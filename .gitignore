@@ -8,3 +8,9 @@ expo-env.d.ts
 .DS_Store
 .env
 .env.*
+
+# Cloudflare Workers (api/)
+.dev.vars
+.wrangler/
+!.env.example
+!.dev.vars.example

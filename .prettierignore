@@ -7,3 +7,7 @@ bun.lock
 assets
 docs
 .github
+api/migrations
+api/node_modules
+api/.wrangler
+api/bun.lock

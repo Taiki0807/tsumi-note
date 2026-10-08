@@ -1,0 +1,34 @@
+name = "tsumi-note-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 非機密の設定のみ。秘密情報(BETTER_AUTH_SECRET / RESEND_API_KEY 等)は
+# `wrangler secret put` で登録する(docs/PHASE8_SETUP.md 参照)。
+[vars]
+APP_ENV = "development"
+BETTER_AUTH_URL = "http://localhost:8787"
+# 送信元は Resend で認証済みのドメインに置き換えること(未確認)。
+EMAIL_FROM = "つみノート <noreply@example.invalid>"
+APP_SCHEME = "tsumi-note"
+
+# database_id は `wrangler d1 create tsumi-note-db` の出力値に置き換える(未設定)。
+[[d1_databases]]
+binding = "DB"
+database_name = "tsumi-note-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# 本番環境。値は手動設定後に置き換える。
+[env.production]
+name = "tsumi-note-api-production"
+[env.production.vars]
+APP_ENV = "production"
+BETTER_AUTH_URL = "https://api.example.invalid"
+EMAIL_FROM = "つみノート <noreply@example.invalid>"
+APP_SCHEME = "tsumi-note"
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "tsumi-note-db-production"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
