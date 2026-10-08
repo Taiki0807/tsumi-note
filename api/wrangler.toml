@@ -18,6 +18,10 @@ APP_ENV = "development"
 BETTER_AUTH_URL = "http://localhost:8787"
 EMAIL_FROM = "つみノート <noreply@example.invalid>"
 APP_SCHEME = "tsumi-note"
+# app.json の ios.bundleIdentifier。Apple の設定(Capability)自体は未確認
+APPLE_APP_BUNDLE_ID = "com.taiki0807.tsuminote"
+# Google の iOS クライアントID(カンマ区切り)。発行後に設定する。未設定なら Google ログインは無効
+# GOOGLE_CLIENT_IDS = ""
 [[env.development.d1_databases]]
 binding = "DB"
 database_name = "tsumi-note-db"
@@ -34,6 +38,8 @@ APP_ENV = "production"
 BETTER_AUTH_URL = "https://api.example.invalid"
 EMAIL_FROM = "つみノート <noreply@example.invalid>"
 APP_SCHEME = "tsumi-note"
+APPLE_APP_BUNDLE_ID = "com.taiki0807.tsuminote"
+# GOOGLE_CLIENT_IDS = ""
 # Universal Links を使う場合のみ設定(例: "https://links.example.com")。
 # APP_UNIVERSAL_LINK_ORIGIN = ""
 [[env.production.d1_databases]]

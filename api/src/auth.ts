@@ -21,7 +21,18 @@ export type AuthDeps = {
   environment: string;
   /** Universal Links 用のHTTPS origin(任意) */
   universalLinkOrigin?: string;
+  /** Sign in with Apple(ネイティブ)。IDトークンの audience として検証するアプリの Bundle ID */
+  appleBundleId?: string;
+  /** Google の OAuth クライアントID(iOS)。IDトークンの audience として検証する。複数可 */
+  googleClientIds?: string[];
 };
+
+/**
+ * ソーシャルログインはアプリがネイティブSDKで取得したIDトークンをPOSTする方式のみ許可する。
+ * ブラウザ経由のリダイレクト方式(/sign-in/social の idToken なし・/callback/*)は、Expoプラグインが
+ * セッションCookieをdeep linkのURLへ付与するため使用しない。
+ */
+const REDIRECT_SOCIAL_PATHS = /^\/(callback\/.+|link-social|oauth2\/.+)$/;
 
 /** リダイレクト先として検証するbody/queryのキー */
 const REDIRECT_KEYS = ['callbackURL', 'redirectTo', 'errorCallbackURL', 'newUserCallbackURL'] as const;
@@ -49,6 +60,7 @@ export const RATE_LIMIT_RULES = {
   '/reset-password': { window: 60, max: 5 },
   '/change-password': { window: 60, max: 5 },
   '/verify-email': { window: 60, max: 10 },
+  '/sign-in/social': { window: 60, max: 10 },
 } as const;
 
 export function createAuth(deps: AuthDeps) {
@@ -80,6 +92,22 @@ export function createAuth(deps: AuthDeps) {
     // Better Auth は遷移先にも同じ一覧を使うため、遷移先の最終判断は下の before hook で行う
     trustedOrigins: redirects.trustedOrigins,
     plugins: [expo()],
+    // 設定された方式だけを有効にする(未設定ならそのプロバイダーは使えない)。
+    // ネイティブのIDトークン方式のみを使うため clientSecret は不要(リダイレクト方式は before hook で拒否)
+    socialProviders: {
+      ...(deps.appleBundleId
+        ? {
+            apple: {
+              clientId: deps.appleBundleId,
+              clientSecret: '',
+              appBundleIdentifier: deps.appleBundleId,
+            },
+          }
+        : {}),
+      ...(deps.googleClientIds?.length
+        ? { google: { clientId: deps.googleClientIds, clientSecret: '' } }
+        : {}),
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
@@ -139,6 +167,15 @@ export function createAuth(deps: AuthDeps) {
             if (!redirects.isAllowedRedirect(value)) {
               throw new APIError('FORBIDDEN', { message: `Invalid ${key}` });
             }
+          }
+        }
+        if (REDIRECT_SOCIAL_PATHS.test(ctx.path)) {
+          throw new APIError('NOT_FOUND', { message: 'Not found' });
+        }
+        if (ctx.path === '/sign-in/social') {
+          const idToken = (reqBody.idToken ?? null) as { token?: unknown } | null;
+          if (typeof idToken?.token !== 'string' || idToken.token.length === 0) {
+            throw new APIError('BAD_REQUEST', { message: 'idToken is required' });
           }
         }
         const field = PASSWORD_FIELDS[ctx.path];

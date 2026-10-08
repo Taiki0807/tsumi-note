@@ -17,6 +17,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SplashView } from '@/components/splash-view';
 import { DatabaseProvider } from '@/db/database-provider';
 import { useTheme } from '@/design';
+import { AuthProvider } from '@/features/auth/auth-context';
 import { useApplyStoredSettings } from '@/features/settings/use-settings';
 
 // Keep the native splash until fonts are loaded, then hand over to <SplashView/> while the DB migrates.
@@ -62,7 +63,10 @@ export default function RootLayout() {
             </Text>
           )}
         >
-          <AppStack />
+          {/* ゲストでも全機能を使えるよう、認証状態の読み込みでアプリの表示を止めない */}
+          <AuthProvider>
+            <AppStack />
+          </AuthProvider>
         </DatabaseProvider>
       </SafeAreaProvider>
     </View>

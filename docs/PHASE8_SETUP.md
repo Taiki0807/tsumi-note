@@ -26,7 +26,22 @@ Apple Developer 側の App ID がこの Bundle Identifier で登録済みかは�
 | `APP_SCHEME` | 非機密 | メール内リンクのリダイレクト先(deep link) | 同上 |
 | `DB` | binding | Cloudflare D1 | `wrangler.toml` `[[d1_databases]]` |
 
-PR 2 以降: `APPLE_CLIENT_ID` `APPLE_TEAM_ID` `APPLE_KEY_ID` `APPLE_PRIVATE_KEY` / `GOOGLE_IOS_CLIENT_ID` 等。
+**PR 2 で追加(API / Worker)**
+
+| 名前 | 種別 | 用途 | 設定場所 |
+|---|---|---|---|
+| `APPLE_APP_BUNDLE_ID` | 非機密 | 設定するとSign in with Appleが有効。IDトークンの audience として検証する(`com.taiki0807.tsuminote`) | `wrangler.toml` `[vars]`(環境ごと) |
+| `GOOGLE_CLIENT_IDS` | 非機密 | 設定するとGoogleログインが有効。iOSクライアントID(カンマ区切りで複数可)。IDトークンの audience として検証する | 同上 |
+
+どちらも未設定ならそのプロバイダーは無効。ネイティブのIDトークン方式のみを使うため、Apple の `.p8` / client secret や Google の client secret は**不要**(API は保持しない)。
+
+**PR 2 で追加(アプリ / Expo、`.env.example` 参照。`EXPO_PUBLIC_*` はビルドに埋め込まれる公開値)**
+
+| 名前 | 用途 |
+|---|---|
+| `EXPO_PUBLIC_API_URL` | 認証APIのURL。未設定ならアカウント機能は無効(ゲスト利用のみ)。本番は https 必須、開発のみ `http://localhost` / プライベートIPを許可 |
+| `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` | GoogleのiOSクライアントID。未設定ならGoogleログインは無効。設定すると `app.config.ts` が逆順ドメインのURL schemeを登録する |
+
 PR 5 以降: R2 binding(`IMAGES`)。
 
 ## 2. Cloudflare(Workers / D1)
@@ -76,24 +91,38 @@ PR 5 以降: R2 binding(`IMAGES`)。
 - **Universal Links の評価**: カスタムURL Schemeは他アプリが同じSchemeを登録すると再設定トークンを奪われる余地が残る。
   本番では Universal Links(HTTPS + `apple-app-site-association`)への移行を推奨する。`APP_UNIVERSAL_LINK_ORIGIN` を設定すると
   `https://<origin>/auth/reset-password` 等を許可できる(AASA配置・Associated Domains はPR 2 以降で対応。未確認)。
-- deep link を受ける画面・クライアント実装は PR 2(認証画面)で追加する。PR 1 はサーバー側のみ。
+- deep link を受ける画面は PR 2 で追加済み: `tsumi-note://verified` → `app/verified.tsx`、`tsumi-note://reset-password?token=…` → `app/reset-password.tsx`
+  (expo-router がパスに対応づける)。これ以外のパスは `app/+not-found.tsx` でホームへ戻す。認証情報らしきクエリ(`cookie` / `session_token` / `bearer` / `access_token`)が付いたリンクは信用しない(`src/features/auth/deep-link.ts`)。
 
-## 5. Apple(PR 2 で使用・未確認)
+## 5. Apple(PR 2 で実装済み・設定と実機動作は未確認)
+
+実装方式: アプリが `expo-apple-authentication` でIDトークンを取得(`nonce` はログインごとにランダム生成し、SHA-256をAppleへ、生値をAPIへ渡す)し、
+`POST /api/auth/sign-in/social` に `idToken` を送る。API は Apple の公開鍵・issuer・audience(`APPLE_APP_BUNDLE_ID`)・nonce を検証する。
 
 1. Apple Developer Program に加入済みであることを確認。
 2. Certificates, Identifiers & Profiles → Identifiers → App ID(`com.taiki0807.tsuminote`)で **Sign in with Apple** Capability を有効化。
-3. ネイティブ(iOSアプリ)のみなら Services ID は不要。Web/Androidフローを使う場合のみ Services ID と Return URL を作る。
-4. Keys → Sign in with Apple を有効にした Key を作成し `.p8` をダウンロード(再ダウンロード不可)。Key ID・Team ID を控える。
-5. `.p8` の内容から client secret(JWT)を生成してSecretに登録する。**`.p8` はコミットしない。**
+3. アプリ側: `app.json` に `ios.usesAppleSignIn: true` と `expo-apple-authentication` プラグインを設定済み。**Expo Go では動かない**ため、Development Build(`expo prebuild` + EAS Build など)が必要。Provisioning Profile の再生成が必要になる場合がある。
+4. ネイティブのみのため Services ID・`.p8` Key・client secret は不要(Web/Androidフローを使う場合のみ必要)。
+5. API の `APPLE_APP_BUNDLE_ID` に Bundle ID を設定する。
 6. Hide My Email: リレーアドレス(`@privaterelay.appleid.com`)で届く。メール送信元ドメインを Apple の「Sign in with Apple for Email Communication」に登録しないとリレー宛メールが届かない。
 
-## 6. Google(PR 2 で使用・未確認)
+## 6. Google(PR 2 で実装済み・設定と実機動作は未確認)
+
+実装方式: アプリが `expo-auth-session` で認可コードフロー(**PKCE + state + nonce**)を行い、Googleのトークンエンドポイントからアプリ内で `id_token` を取得して
+`POST /api/auth/sign-in/social` に `idToken`(+ nonce)を送る。セッションを deep link に載せるブラウザ経由のリダイレクト方式は使わず、API も拒否する
+(`idToken` なしの `/sign-in/social`、`/callback/*`、`/link-social` は 400/404)。API は Google の公開鍵・issuer・audience(`GOOGLE_CLIENT_IDS`)・nonce を検証する。
 
 1. Google Cloud Console でプロジェクト作成 → OAuth同意画面(アプリ名・サポートメール・プライバシーポリシーURL等)。
 2. 認証情報 → OAuth クライアントID → 種類「iOS」、Bundle ID に `com.taiki0807.tsuminote` を指定。
-3. 発行される iOS クライアントID と、その reverse client ID(`com.googleusercontent.apps.<id>`)を URL scheme に追加する(`app.json`。PR 2 で対応)。
-4. サーバー側で ID トークンを検証するため、サーバーの client ID(Web クライアント)も必要になる場合がある。
+3. 発行された iOS クライアントIDを、アプリの `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` と API の `GOOGLE_CLIENT_IDS` の両方に設定する。
+   リダイレクトURI(`com.googleusercontent.apps.<id>:/oauthredirect`)の URL scheme は `app.config.ts` が自動で Info.plist に登録する(Development Build の再ビルドが必要)。
+4. client secret は不要(iOSクライアントはPKCEを使用)。
 5. 公開状態が「テスト」の間はテストユーザーのみ利用可。
+
+## 6.5 アカウントの扱い(PR 2 の範囲)
+
+- 同じメールアドレスでも、認証方式が異なるアカウントは自動統合しない(`accountLinking` は無効)。メール登録済みのメールでGoogle/Appleを使うと、APIはログインを拒否する。連携機能はv1では提供しない。
+- PR 2 時点では、ログインしても**ローカルDBの切替・ゲストデータ引き継ぎ・同期は行わない**(PR 3 以降)。ゲストの学習データには触れず、ログアウトしても削除しない。
 
 ## 7. 開発環境と本番環境
 
@@ -108,3 +137,11 @@ PR 5 以降: R2 binding(`IMAGES`)。
 ## 8. メール確認後の再ログイン
 
 `emailVerification.autoSignInAfterVerification` は `false` のままにしてください。`true` にすると、確認後のカスタムURL Schemeへの遷移URLにセッションCookieが付与され、同じschemeを登録した別アプリに漏れます。確認後はアプリで改めてログインする仕様です。
+
+## 9. ローカルでの動作確認手順(PR 2)
+
+1. API: `cd api && cp .dev.vars.example .dev.vars`(`BETTER_AUTH_SECRET` を32文字以上で設定。`RESEND_API_KEY` 未設定ならメール送信はスキップされる)→ `bun run db:migrate:local` → `bun run dev`。
+2. アプリ: ルートで `.env.example` を `.env` にコピーし、`EXPO_PUBLIC_API_URL` に**端末から到達できる**APIのURLを設定する(実機ならLANのIP。例 `http://192.168.0.10:8787`。API側の `BETTER_AUTH_URL` も同じURLにする)。
+3. Development Build で起動する(Apple / Google ログインとdeep linkは Expo Go では確認できない)。
+4. 確認の流れ: マイページ →「アカウントを作成」→ メールで登録 → 確認メールのリンク → `tsumi-note://verified` でアプリが開く → ログイン → マイページのメールアドレスとログアウトを確認。
+5. `EXPO_PUBLIC_API_URL` を空にして起動すると、アカウント機能は無効(ボタンは無効化)で、ゲスト利用だけが通常どおり動く。
