@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --env development",
+    "check:deploy": "bun scripts/check-deploy.ts",
+    "deploy": "bun run check:deploy && wrangler deploy --env production",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 migrations apply tsumi-note-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply tsumi-note-db --remote"
+    "db:migrate:local": "wrangler d1 migrations apply tsumi-note-db --local --env development",
+    "db:migrate:remote": "wrangler d1 migrations apply tsumi-note-db-production --remote --env production"
   },
   "dependencies": {
     "@better-auth/expo": "^1.7.7",

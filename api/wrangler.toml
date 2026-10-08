@@ -3,23 +3,30 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# 非機密の設定のみ。秘密情報(BETTER_AUTH_SECRET / RESEND_API_KEY 等)は
-# `wrangler secret put` で登録する(docs/PHASE8_SETUP.md 参照)。
-[vars]
+# 重要: top-level には APP_ENV・D1・vars を置かない。
+# `wrangler deploy` を環境指定なしで実行しても、APP_ENV 未設定のため Worker は 500 で停止し、
+# 開発設定が公開環境で有効になることはない(src/index.ts)。
+# 本番は `bun run deploy`(--env production 固定)、開発は `bun run dev`(--env development)を使う。
+# 秘密情報(BETTER_AUTH_SECRET / RESEND_API_KEY 等)は `wrangler secret put <NAME> --env <env>` で登録する。
+# 詳細は docs/PHASE8_SETUP.md を参照。
+
+# ---- 開発環境(ローカル専用。デプロイ用途ではない) ----
+[env.development]
+name = "tsumi-note-api-development"
+[env.development.vars]
 APP_ENV = "development"
 BETTER_AUTH_URL = "http://localhost:8787"
-# 送信元は Resend で認証済みのドメインに置き換えること(未確認)。
 EMAIL_FROM = "つみノート <noreply@example.invalid>"
 APP_SCHEME = "tsumi-note"
-
-# database_id は `wrangler d1 create tsumi-note-db` の出力値に置き換える(未設定)。
-[[d1_databases]]
+[[env.development.d1_databases]]
 binding = "DB"
 database_name = "tsumi-note-db"
+# `wrangler d1 create tsumi-note-db` の出力値に置き換える(未設定)
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
-# 本番環境。値は手動設定後に置き換える。
+# ---- 本番環境 ----
+# 以下のダミー値(example.invalid / 0000…)が残っていると `bun run deploy` は事前チェックで失敗する。
 [env.production]
 name = "tsumi-note-api-production"
 [env.production.vars]
@@ -27,6 +34,8 @@ APP_ENV = "production"
 BETTER_AUTH_URL = "https://api.example.invalid"
 EMAIL_FROM = "つみノート <noreply@example.invalid>"
 APP_SCHEME = "tsumi-note"
+# Universal Links を使う場合のみ設定(例: "https://links.example.com")。
+# APP_UNIVERSAL_LINK_ORIGIN = ""
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "tsumi-note-db-production"

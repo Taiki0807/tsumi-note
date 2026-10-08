@@ -9,8 +9,10 @@ export type Bindings = {
   RESEND_API_KEY?: string;
   /** 送信元(Resendで認証済みドメイン) */
   EMAIL_FROM: string;
-  /** development | production */
+  /** development | production のみ有効(未設定・不正値は500で停止) */
   APP_ENV: string;
   /** アプリのURL scheme(メール内リンクのリダイレクト先) */
   APP_SCHEME: string;
+  /** Universal Links 用のHTTPS origin(任意。設定すると `<origin>/auth/<path>` も遷移先に許可) */
+  APP_UNIVERSAL_LINK_ORIGIN?: string;
 };

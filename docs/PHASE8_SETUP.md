@@ -40,11 +40,16 @@ PR 5 以降: R2 binding(`IMAGES`)。
 4. Secrets 登録:
    `bunx wrangler secret put BETTER_AUTH_SECRET`、`bunx wrangler secret put RESEND_API_KEY`
    (本番は `--env production`)。
-5. `BETTER_AUTH_URL` を実際のWorker URL(またはカスタムドメイン)に変更し `bun run deploy`。
-6. ローカル開発: `api/.dev.vars.example` を `api/.dev.vars` にコピーして値を設定し `bun run dev`(`http://localhost:8787`)。
+5. `[env.production.vars]` の `BETTER_AUTH_URL`(https 必須)・`EMAIL_FROM` と `[[env.production.d1_databases]]` の `database_id` を実値に変更し、`bun run deploy`。
+   - `bun run deploy` は `check:deploy`(`scripts/check-deploy.ts`)で設定を検証してから `wrangler deploy --env production` を実行する。
+     ダミー値(`.invalid` / `0000…`)の残存、top-level への `APP_ENV`/D1 配置、http の `BETTER_AUTH_URL` は検出して中止する。
+   - `wrangler.toml` の top-level には `APP_ENV` を置かない。環境指定なしの `wrangler deploy` を直接実行しても、`APP_ENV` 未設定のため Worker は 500 で停止する。**直接 `wrangler deploy` は使わない**こと。
+   - 開発用Workerのデプロイは提供しない(開発は `bun run dev` のローカルのみ)。
+6. ローカル開発: `api/.dev.vars.example` を `api/.dev.vars` にコピーして値を設定し `bun run dev`(`--env development`、`http://localhost:8787`)。
 
-開発と本番の違い: 開発は `APP_ENV=development`(`RESEND_API_KEY` 未設定ならメール送信をスキップ、Cookieの `Secure` なし、`exp://` を許可)。
-本番は `APP_ENV=production`(APIキー未設定ならメール送信が失敗、Secure Cookie、`exp://` 不許可)。D1・Secrets は環境ごとに分離する。
+開発と本番の違い: 開発は `APP_ENV=development`(`RESEND_API_KEY` 未設定ならメール送信をスキップ、Cookieの `Secure` なし、ローカル/プライベートIPの `exp://…/--/<path>` を許可)。
+本番は `APP_ENV=production`(APIキー未設定ならメール送信が失敗、Secure Cookie 必須、https 必須、`exp://` 不許可)。D1・Secrets は環境ごとに分離する。
+`APP_ENV` は `production` / `development` 以外(未設定含む)だと全リクエストが 500 になる。
 
 ## 3. Resend(メール送信)
 
@@ -61,6 +66,12 @@ PR 5 以降: R2 binding(`IMAGES`)。
 - 再設定メールのリンク: `<BETTER_AUTH_URL>/api/auth/reset-password/<token>?callbackURL=tsumi-note://reset-password`
   サーバーが検証後、`tsumi-note://reset-password?token=…` へリダイレクトする(無効・期限切れは `?error=INVALID_TOKEN`)。
 - クライアントの `requestPasswordReset({ redirectTo: 'tsumi-note://reset-password' })` / `sendVerificationEmail({ callbackURL: 'tsumi-note://…' })` で指定する。
+- **リダイレクト先は完全一致の許可リストのみ**(`api/src/redirect-policy.ts`)。`callbackURL` / `redirectTo` / `errorCallbackURL` / `newUserCallbackURL` は
+  `tsumi-note://reset-password` と `tsumi-note://verified`(および任意設定の Universal Link `<APP_UNIVERSAL_LINK_ORIGIN>/auth/<path>`)以外は 403 で拒否し、メール送信もトークン発行もしない。
+  `%` エンコード・userinfo・大文字小文字違い・末尾スラッシュ・query/fragment 付きも拒否する。PR 2 のアプリ側 deep link はこの2つに合わせる。
+- **Universal Links の評価**: カスタムURL Schemeは他アプリが同じSchemeを登録すると再設定トークンを奪われる余地が残る。
+  本番では Universal Links(HTTPS + `apple-app-site-association`)への移行を推奨する。`APP_UNIVERSAL_LINK_ORIGIN` を設定すると
+  `https://<origin>/auth/reset-password` 等を許可できる(AASA配置・Associated Domains はPR 2 以降で対応。未確認)。
 - deep link を受ける画面・クライアント実装は PR 2(認証画面)で追加する。PR 1 はサーバー側のみ。
 
 ## 5. Apple(PR 2 で使用・未確認)

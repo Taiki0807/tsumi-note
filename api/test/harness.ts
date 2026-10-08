@@ -12,7 +12,9 @@ const MIGRATIONS_DIR = join(import.meta.dir, '..', 'migrations');
 export const BASE = 'http://localhost:8787';
 export const SECRET = 'test-secret-test-secret-test-secret-0123';
 
-export function createHarness() {
+export function createHarness(
+  opts: { environment?: string; baseURL?: string; universalLinkOrigin?: string } = {},
+) {
   const sqlite = new Database(':memory:');
   sqlite.run('PRAGMA foreign_keys = ON');
   // 本番(D1)と同じ migrations/*.sql を適用して、スキーマのずれを検出する
@@ -29,9 +31,10 @@ export function createHarness() {
   const auth = createAuth({
     db,
     secret: SECRET,
-    baseURL: BASE,
+    baseURL: opts.baseURL ?? BASE,
     appScheme: 'tsumi-note',
-    isDevelopment: true,
+    environment: 'environment' in opts ? (opts.environment as string) : 'development',
+    universalLinkOrigin: opts.universalLinkOrigin,
     sendEmail: async (m) => {
       sent.push(m);
     },
@@ -45,7 +48,7 @@ export function createHarness() {
     init: { body?: unknown; ip?: string; headers?: Record<string, string> } = {},
   ) {
     const ip = init.ip ?? `10.0.0.${++ipCounter}`;
-    return app.request(`${BASE}${path}`, {
+    return app.request(`${opts.baseURL ?? BASE}${path}`, {
       method: init.body === undefined ? 'GET' : 'POST',
       headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip, ...init.headers },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),

@@ -4,6 +4,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { existingAccountEmail, passwordResetEmail, verificationEmail, type EmailSender } from './email';
 import * as schema from './db/schema';
+import { createRedirectPolicy, parseAppEnvironment } from './redirect-policy';
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, validatePassword } from './password-policy';
 
 type AdapterDb = Parameters<typeof drizzleAdapter>[0];
@@ -16,9 +17,14 @@ export type AuthDeps = {
   sendEmail: EmailSender;
   /** Workers の ctx.waitUntil。メール送信の完了待ちでレスポンスが遅れ、登録済み判定が時間差で漏れるのを防ぐ */
   waitUntil?: (promise: Promise<unknown>) => void;
-  /** development のみ true。production では必ず false */
-  isDevelopment?: boolean;
+  /** 'production' | 'development' 以外は例外(安全側に失敗) */
+  environment: string;
+  /** Universal Links 用のHTTPS origin(任意) */
+  universalLinkOrigin?: string;
 };
+
+/** リダイレクト先として検証するbody/queryのキー */
+const REDIRECT_KEYS = ['callbackURL', 'redirectTo', 'errorCallbackURL', 'newUserCallbackURL'] as const;
 
 /** 確認・再設定トークンの有効期限(秒) */
 export const TOKEN_TTL_SECONDS = 60 * 60;
@@ -46,6 +52,16 @@ export const RATE_LIMIT_RULES = {
 } as const;
 
 export function createAuth(deps: AuthDeps) {
+  const environment = parseAppEnvironment(deps.environment);
+  const isProduction = environment === 'production';
+  if (isProduction && new URL(deps.baseURL).protocol !== 'https:') {
+    throw new Error('production の BETTER_AUTH_URL は https が必須です');
+  }
+  const redirects = createRedirectPolicy({
+    environment,
+    appScheme: deps.appScheme,
+    universalLinkOrigin: deps.universalLinkOrigin,
+  });
   const queue = (task: Promise<void>) => {
     // 送信失敗は握りつぶさずログ(個人情報なし)に残す
     const guarded = task.catch((e: unknown) => {
@@ -60,8 +76,8 @@ export function createAuth(deps: AuthDeps) {
     secret: deps.secret,
     baseURL: deps.baseURL,
     database: drizzleAdapter(deps.db, { provider: 'sqlite', schema }),
-    // モバイルアプリのdeep linkとExpo開発時のOriginのみ許可する
-    trustedOrigins: [`${deps.appScheme}://`, ...(deps.isDevelopment ? ['exp://'] : [])],
+    // 許可する遷移先の完全一致URLのみ(development のみ exp:// を追加)。最終判断は下の before hook
+    trustedOrigins: redirects.trustedOrigins,
     plugins: [expo()],
     emailAndPassword: {
       enabled: true,
@@ -104,10 +120,21 @@ export function createAuth(deps: AuthDeps) {
     advanced: {
       // Cloudflare が付与するヘッダーのみ信頼する(x-forwarded-for は偽装可能)
       ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] },
-      useSecureCookies: !deps.isDevelopment,
+      useSecureCookies: isProduction,
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        // リダイレクト先は許可リストとの完全一致のみ。トークンを付けて遷移するため全エンドポイントで検証する
+        const query = (ctx.query ?? {}) as Record<string, unknown>;
+        const reqBody = (ctx.body ?? {}) as Record<string, unknown>;
+        for (const key of REDIRECT_KEYS) {
+          for (const value of [query[key], reqBody[key]]) {
+            if (value === undefined || value === null || value === '') continue;
+            if (!redirects.isAllowedRedirect(value)) {
+              throw new APIError('FORBIDDEN', { message: `Invalid ${key}` });
+            }
+          }
+        }
         const field = PASSWORD_FIELDS[ctx.path];
         if (!field) return;
         const body = (ctx.body ?? {}) as Record<string, unknown>;
