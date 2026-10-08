@@ -8,8 +8,16 @@ import {
   type DarkModeSetting,
   type ReminderSettings,
 } from '@/domain/app-settings';
-import { daysUntilExam, normalizeGoal, validateGoal, type GoalInput } from '@/domain/goal';
+import {
+  applyPlanEdit,
+  daysUntilExam,
+  normalizeGoal,
+  togglePlanItem,
+  validateGoal,
+  type GoalInput,
+} from '@/domain/goal';
 import { loadReviewSettings } from '@/features/review/review-use-cases';
+import type { TimerSettings } from '@/features/timer/timer-logic';
 import { createTimerStorage } from '@/features/timer/timer-storage';
 
 import { applyReminder, type ReminderResult, type ReminderScheduler } from './reminder-notifications';
@@ -22,10 +30,24 @@ export function loadActiveGoal({ goals }: Pick<Repositories, 'goals'>): Goal | u
   return goals.getActive();
 }
 
-/** Creates or edits the single active goal. Throws on invalid input so nothing half-valid is stored. */
+/**
+ * Creates or edits the single active goal. `input.actionPlan` is the plain text of the edit form
+ * (one item per line); items that keep their text keep their check state. Throws on invalid input
+ * so nothing half-valid is stored.
+ */
 export function saveGoal({ goals }: Pick<Repositories, 'goals'>, input: GoalInput): Goal {
   if (!validateGoal(input)) throw new Error('Invalid goal');
-  return goals.save(normalizeGoal(input));
+  const normalized = normalizeGoal(input);
+  const previous = goals.getActive()?.actionPlan ?? '';
+  return goals.save({ ...normalized, actionPlan: applyPlanEdit(previous, normalized.actionPlan) });
+}
+
+/** Checks / unchecks one 行動プラン item and persists it; other items keep their state. */
+export function toggleActionPlanItem({ goals }: Pick<Repositories, 'goals'>, index: number): Goal | undefined {
+  const goal = goals.getActive();
+  if (!goal) return undefined;
+  const { title, examDate, objective, purpose } = goal;
+  return goals.save({ title, examDate, objective, purpose, actionPlan: togglePlanItem(goal.actionPlan, index) });
 }
 
 export function deleteGoal({ goals }: Pick<Repositories, 'goals'>): void {
@@ -69,6 +91,22 @@ export async function restoreReminder(repos: SettingsRepos, scheduler: ReminderS
   if (reminder.enabled) await saveReminder(repos, scheduler, reminder);
 }
 
+// ---------- Timer settings (Phase 2 storage, edited from マイページ) ----------
+
+/** Reuses the timer's own storage, so マイページ and the timer tab always read and write the same values. */
+export function loadTimerSettings(repos: Repositories): TimerSettings {
+  return createTimerStorage(repos).loadSettings();
+}
+
+/** Clamped and persisted; a running session keeps its snapshot and the new values apply from the next start. */
+export function saveTimerSettings(repos: Repositories, input: TimerSettings): TimerSettings {
+  return createTimerStorage(repos).saveSettings(input);
+}
+
+export function describeTimerSettings(timer: TimerSettings): string {
+  return `集中${timer.focusMinutes}分・休憩${timer.breakMinutes}分`;
+}
+
 // ---------- My page ----------
 
 export type MyPageSummary = {
@@ -84,11 +122,11 @@ export type MyPageSummary = {
 
 export function loadMyPageSummary(repos: Repositories, now: number): MyPageSummary {
   const goal = repos.goals.getActive();
-  const timer = createTimerStorage(repos).loadSettings();
+  const timer = loadTimerSettings(repos);
   const review = loadReviewSettings(repos);
   return {
     goal: goal ? { title: goal.title, daysRemaining: daysUntilExam(goal.examDate, now) } : null,
-    timerSummary: `集中${timer.focusMinutes}分・休憩${timer.breakMinutes}分`,
+    timerSummary: describeTimerSettings(timer),
     reviewSummary: review.timeLimitEnabled ? `1問${review.timeLimitSeconds}秒` : '制限なし',
     reminderSummary: describeReminder(loadReminder(repos)),
     darkMode: loadDarkMode(repos),

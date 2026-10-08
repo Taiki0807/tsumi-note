@@ -24,6 +24,10 @@ import {
 } from './timer-notifications';
 import { createTimerStorage } from './timer-storage';
 
+function isSameSettings(a: TimerSettings, b: TimerSettings): boolean {
+  return a.focusMinutes === b.focusMinutes && a.breakMinutes === b.breakMinutes && a.rounds === b.rounds;
+}
+
 /** Timer State / Hook: glues pure logic to storage, notifications and AppState. */
 export function useTimer() {
   const repos = useRepositories();
@@ -129,16 +133,28 @@ export function useTimer() {
 
   const onReset = useCallback(() => commit(reset(settings), Date.now()), [commit, settings]);
 
-  const updateSettings = useCallback(
-    (next: TimerSettings) => {
-      const saved = storage.saveSettings(next);
+  /** Adopts saved settings: a session in progress keeps its own snapshot; an idle timer shows the new length. */
+  const applySettings = useCallback(
+    (saved: TimerSettings) => {
       setSettings(saved);
-      // A session in progress keeps its own snapshot; an idle timer shows the new length.
       if (stateRef.current.status === 'idle' || stateRef.current.status === 'completed') {
         commit(createIdleState(saved), Date.now());
       }
     },
-    [commit, storage],
+    [commit],
+  );
+
+  const updateSettings = useCallback(
+    (next: TimerSettings) => applySettings(storage.saveSettings(next)),
+    [applySettings, storage],
+  );
+
+  // The settings sheet on マイページ writes the same storage; pick its changes up when this tab regains focus.
+  useFocusEffect(
+    useCallback(() => {
+      const saved = storage.loadSettings();
+      if (!isSameSettings(saved, settings)) applySettings(saved);
+    }, [applySettings, settings, storage]),
   );
 
   return {

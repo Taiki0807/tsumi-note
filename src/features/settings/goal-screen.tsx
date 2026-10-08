@@ -1,25 +1,27 @@
 import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, EmptyState, IconButton } from '@/components/form-ui';
+import { Button, ConfirmDeleteSheet, EmptyState, IconButton } from '@/components/form-ui';
 import { Icon, type IconName } from '@/components/icons';
 import { fontFamily, layout, radius, typography, useTheme } from '@/design';
-import { daysUntilExam, formatExamDate, parseActionPlan } from '@/domain/goal';
+import { daysUntilExam, formatExamDate, parsePlanItems } from '@/domain/goal';
 
 import { GoalEditSheet, type GoalSection } from './goal-edit-sheet';
 import { useGoal } from './use-settings';
 
-/** Figma IconButton/…を編集: 36x36 (radius 18) pencil. */
+/** Figma IconButton/…を編集: 44x44 circle; white 18% on the hero, white on tinted cards. */
 function EditButton({
   label,
   onPress,
   onPrimary,
+  iconSize,
 }: {
   label: string;
   onPress: () => void;
   onPrimary?: boolean;
+  iconSize: number;
 }) {
   const colors = useTheme();
   return (
@@ -27,21 +29,20 @@ function EditButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      hitSlop={4}
       style={{
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: onPrimary ? 'rgba(255,255,255,0.2)' : colors.surface,
+        backgroundColor: onPrimary ? 'rgba(255,255,255,0.18)' : colors.surface,
       }}
     >
       <Icon
         name="edit"
-        size={18}
-        color={onPrimary ? colors.textOnPrimary : colors.textPrimary}
-        strokeWidth={2.2}
+        size={iconSize}
+        color={onPrimary ? colors.textOnPrimary : colors.textSecondary}
+        strokeWidth={onPrimary ? 1.8 : 2.2}
       />
     </Pressable>
   );
@@ -49,10 +50,14 @@ function EditButton({
 
 type Tone = 'success' | 'info' | 'warning';
 
-/** Figma Card/…: tinted card (success / info / warning) with an icon + label head and an edit button. */
+/**
+ * Figma Card/…: tinted card (success / info / warning), radius 20, padding 20/16/16/20, gap 8,
+ * a 44pt head row (18pt icon + 13/ExtraBold label) with the edit button.
+ */
 function SectionCard({
   tone,
   icon,
+  iconStrokeWidth,
   title,
   editLabel,
   onEdit,
@@ -60,6 +65,7 @@ function SectionCard({
 }: {
   tone: Tone;
   icon: IconName;
+  iconStrokeWidth: number;
   title: string;
   editLabel: string;
   onEdit: () => void;
@@ -67,83 +73,73 @@ function SectionCard({
 }) {
   const colors = useTheme();
   const palette = {
-    success: { bg: colors.successSoft, fg: colors.successText },
-    info: { bg: colors.infoSoft, fg: colors.infoText },
-    warning: { bg: colors.warningSoft, fg: colors.warningText },
+    success: { bg: colors.successSoft, icon: colors.success, text: colors.successText },
+    info: { bg: colors.infoSoft, icon: colors.info, text: colors.infoText },
+    warning: { bg: colors.warningSoft, icon: colors.warning, text: colors.warningText },
   }[tone];
   return (
-    <View style={{ gap: 4, padding: 16, borderRadius: radius.lg, backgroundColor: palette.bg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+    <View
+      style={{
+        gap: 8,
+        paddingLeft: 20,
+        paddingTop: 16,
+        paddingRight: 16,
+        paddingBottom: 20,
+        borderRadius: 20,
+        backgroundColor: palette.bg,
+      }}
+    >
+      <View style={{ height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Icon name={icon} size={18} color={palette.fg} strokeWidth={2.2} />
-          <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: palette.fg }}>
+          <Icon name={icon} size={18} color={palette.icon} strokeWidth={iconStrokeWidth} />
+          <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: palette.text }}>
             {title}
           </Text>
         </View>
-        <EditButton label={editLabel} onPress={onEdit} />
+        <EditButton label={editLabel} onPress={onEdit} iconSize={22} />
       </View>
       {children}
     </View>
   );
 }
 
-/** Figma 06b 目標を削除（確認）: scrim + 28pt-radius dialog with キャンセル / 削除する. */
-function DeleteConfirm({
-  title,
-  visible,
-  onCancel,
-  onConfirm,
-}: {
-  title: string;
-  visible: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
+/** Figma Check/…: 24pt checkbox (radius 8, 2pt primary outline; filled with a white check when done) + 15/Medium text. */
+function PlanCheck({ text, done, onToggle }: { text: string; done: boolean; onToggle: () => void }) {
   const colors = useTheme();
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: done }}
+      accessibilityLabel={text}
+      onPress={onToggle}
+      hitSlop={{ top: 6, bottom: 6 }}
+      style={{ minHeight: 24, flexDirection: 'row', alignItems: 'center', gap: 12 }}
+    >
       <View
         style={{
-          flex: 1,
+          width: 24,
+          height: 24,
+          borderRadius: radius.sm,
+          borderWidth: 2,
+          borderColor: colors.primary,
           alignItems: 'center',
           justifyContent: 'center',
-          padding: 24,
-          backgroundColor: 'rgba(20,16,48,0.5)',
+          backgroundColor: done ? colors.primary : undefined,
         }}
       >
-        <View
-          accessibilityViewIsModal
-          style={{
-            width: '100%',
-            maxWidth: layout.contentMaxWidth,
-            gap: 16,
-            padding: 24,
-            borderRadius: radius['2xl'],
-            backgroundColor: colors.surface,
-          }}
-        >
-          <Text
-            accessibilityRole="header"
-            style={{
-              fontFamily: fontFamily.extraBold,
-              ...typography.heading,
-              lineHeight: 30,
-              color: colors.textPrimary,
-            }}
-          >
-            目標を削除しますか？
-          </Text>
-          <Text style={{ fontFamily: fontFamily.bold, ...typography.bodySm, color: colors.textSecondary }}>
-            「{title}
-            」の目標と、取得する目的・行動プランが削除されます。学習記録・ノート・問題はそのまま残ります。
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <Button label="キャンセル" variant="secondary" flex onPress={onCancel} />
-            <Button label="削除する" variant="danger" flex onPress={onConfirm} />
-          </View>
-        </View>
+        {done ? <Icon name="check" size={14} color={colors.textOnPrimary} strokeWidth={3} /> : null}
       </View>
-    </Modal>
+      <Text
+        style={{
+          flex: 1,
+          fontFamily: fontFamily.regular,
+          ...typography.body,
+          color: done ? colors.textSecondary : colors.textPrimary,
+        }}
+      >
+        {text}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -151,7 +147,7 @@ function DeleteConfirm({
 export function GoalScreen() {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
-  const { goal, save, remove } = useGoal();
+  const { goal, save, remove, toggleActionItem } = useGoal();
   const [editing, setEditing] = useState<GoalSection | null>(null);
   const [editKey, setEditKey] = useState(0);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -162,7 +158,7 @@ export function GoalScreen() {
   };
   const [now] = useState(() => Date.now());
   const days = goal ? daysUntilExam(goal.examDate, now) : null;
-  const plan = goal ? parseActionPlan(goal.actionPlan) : [];
+  const plan = goal ? parsePlanItems(goal.actionPlan) : [];
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
@@ -204,19 +200,31 @@ export function GoalScreen() {
             paddingBottom: Math.max(insets.bottom, 24) + 24,
           }}
         >
-          <View style={{ gap: 12, padding: 20, borderRadius: 24, backgroundColor: colors.primary }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View
+            style={{
+              gap: 14,
+              paddingLeft: 20,
+              paddingTop: 18,
+              paddingRight: 20,
+              paddingBottom: 20,
+              borderRadius: 24,
+              backgroundColor: colors.primary,
+            }}
+          >
+            <View
+              style={{ height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+            >
               <Text
                 style={{
                   fontFamily: fontFamily.extraBold,
                   ...typography.bodySm,
                   lineHeight: 24,
-                  color: colors.primarySoft,
+                  color: colors.textOnPrimary,
                 }}
               >
                 取得したい資格
               </Text>
-              <EditButton label="資格を編集" onPress={() => edit('qualification')} onPrimary />
+              <EditButton label="資格を編集" onPress={() => edit('qualification')} onPrimary iconSize={18} />
             </View>
             <Text
               accessibilityRole="header"
@@ -233,7 +241,6 @@ export function GoalScreen() {
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
-                justifyContent: 'space-between',
                 gap: 12,
                 paddingHorizontal: 14,
                 paddingVertical: 12,
@@ -241,63 +248,38 @@ export function GoalScreen() {
                 backgroundColor: colors.surface,
               }}
             >
-              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Icon name="calendar" size={20} color={colors.primary} strokeWidth={2.2} />
-                <View>
-                  <Text
-                    style={{
-                      fontFamily: fontFamily.bold,
-                      ...typography.caption,
-                      color: colors.textSecondary,
-                    }}
-                  >
-                    受験予定日
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: fontFamily.extraBold,
-                      ...typography.button,
-                      color: colors.textPrimary,
-                    }}
-                  >
-                    {goal.examDate === null ? '未設定' : formatExamDate(goal.examDate)}
-                  </Text>
-                </View>
+              <Icon name="calendar" size={22} color={colors.primary} strokeWidth={2} />
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}
+                >
+                  受験予定日
+                </Text>
+                <Text
+                  style={{ fontFamily: fontFamily.extraBold, ...typography.button, color: colors.textPrimary }}
+                >
+                  {goal.examDate === null ? '未設定' : formatExamDate(goal.examDate)}
+                </Text>
               </View>
               {days !== null && days >= 0 ? (
-                <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 2 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
                   <Text
-                    style={{
-                      fontFamily: fontFamily.bold,
-                      ...typography.caption,
-                      color: colors.textSecondary,
-                    }}
+                    style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}
                   >
                     あと
                   </Text>
                   <Text
-                    style={{
-                      fontFamily: fontFamily.numeric,
-                      fontSize: 22,
-                      lineHeight: 26,
-                      color: colors.primary,
-                    }}
+                    style={{ fontFamily: fontFamily.numeric, fontSize: 22, lineHeight: 26, color: colors.primary }}
                   >
                     {days}
                   </Text>
-                  <Text
-                    style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}
-                  >
+                  <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}>
                     日
                   </Text>
                 </View>
               ) : days !== null ? (
                 <Text
-                  style={{
-                    fontFamily: fontFamily.extraBold,
-                    ...typography.label,
-                    color: colors.textSecondary,
-                  }}
+                  style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.textSecondary }}
                 >
                   受験日を過ぎました
                 </Text>
@@ -308,6 +290,7 @@ export function GoalScreen() {
           <SectionCard
             tone="success"
             icon="target"
+            iconStrokeWidth={2.5}
             title="達成したい目標"
             editLabel="達成したい目標を編集"
             onEdit={() => edit('objective')}
@@ -320,6 +303,7 @@ export function GoalScreen() {
           <SectionCard
             tone="info"
             icon="star"
+            iconStrokeWidth={2}
             title="取得する目的"
             editLabel="取得する目的を編集"
             onEdit={() => edit('purpose')}
@@ -332,60 +316,43 @@ export function GoalScreen() {
           <SectionCard
             tone="warning"
             icon="checklist"
+            iconStrokeWidth={2}
             title="行動プラン"
             editLabel="行動プランを編集"
             onEdit={() => edit('plan')}
           >
             {plan.length === 0 ? (
-              <Text
-                style={{ fontFamily: fontFamily.extraBold, ...typography.body, color: colors.textPrimary }}
-              >
+              <Text style={{ fontFamily: fontFamily.extraBold, ...typography.body, color: colors.textPrimary }}>
                 未設定
               </Text>
             ) : (
-              <View style={{ gap: 10, paddingTop: 6 }}>
+              <View style={{ gap: 10 }}>
                 {plan.map((item, index) => (
-                  <View
-                    key={`${index}-${item}`}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}
-                  >
-                    <View
-                      style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: radius.sm,
-                        borderWidth: 2,
-                        borderColor: colors.primary,
-                      }}
-                    />
-                    <Text
-                      style={{
-                        flex: 1,
-                        fontFamily: fontFamily.regular,
-                        ...typography.body,
-                        color: colors.textPrimary,
-                      }}
-                    >
-                      {item}
-                    </Text>
-                  </View>
+                  <PlanCheck
+                    key={`${index}-${item.text}`}
+                    text={item.text}
+                    done={item.done}
+                    onToggle={() => toggleActionItem(index)}
+                  />
                 ))}
               </View>
             )}
           </SectionCard>
 
+          {/* Figma Button/目標を削除: 44pt text button, 16pt padding, 6pt gap, 18pt trash. */}
           <Pressable
             accessibilityRole="button"
             onPress={() => setConfirmingDelete(true)}
             style={{
+              height: 44,
+              alignSelf: 'flex-start',
               flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
               gap: 6,
-              paddingVertical: 12,
+              paddingHorizontal: 16,
             }}
           >
-            <Icon name="trash" size={18} color={colors.danger} strokeWidth={2.2} />
+            <Icon name="trash" size={18} color={colors.danger} strokeWidth={2} />
             <Text style={{ fontFamily: fontFamily.extraBold, ...typography.bodySm, color: colors.danger }}>
               目標を削除
             </Text>
@@ -412,17 +379,16 @@ export function GoalScreen() {
         onClose={() => setEditing(null)}
         onSave={save}
       />
-      {goal ? (
-        <DeleteConfirm
-          title={goal.title}
-          visible={confirmingDelete}
-          onCancel={() => setConfirmingDelete(false)}
-          onConfirm={() => {
-            remove();
-            setConfirmingDelete(false);
-          }}
-        />
-      ) : null}
+      <ConfirmDeleteSheet
+        visible={confirmingDelete && goal !== undefined}
+        title="目標を削除しますか？"
+        message={`「${goal?.title ?? ''}」の目標と、取得する目的・行動プランが削除されます。学習記録・ノート・問題はそのまま残ります。`}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => {
+          remove();
+          setConfirmingDelete(false);
+        }}
+      />
     </View>
   );
 }

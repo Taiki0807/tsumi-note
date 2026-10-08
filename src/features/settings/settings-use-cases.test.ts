@@ -11,28 +11,42 @@ import {
   type ReminderSettings,
 } from '@/domain/app-settings';
 import {
+  applyPlanEdit,
   daysUntilExam,
   formatExamDate,
   parseActionPlan,
   parseExamDateInput,
+  parsePlanItems,
+  planEditText,
   validateGoal,
   type GoalInput,
 } from '@/domain/goal';
 import { DEFAULT_REVIEW_SETTINGS } from '@/domain/review-settings';
 import { saveReviewSettings } from '@/features/review/review-use-cases';
+import {
+  clampSettings,
+  createIdleState,
+  DEFAULT_TIMER_SETTINGS,
+  start,
+} from '@/features/timer/timer-logic';
+import { createTimerStorage } from '@/features/timer/timer-storage';
 
 import { buildExportJson } from './export-data';
 import type { ReminderScheduler } from './reminder-notifications';
 import {
   deleteGoal,
+  describeTimerSettings,
   loadActiveGoal,
   loadDarkMode,
   loadMyPageSummary,
   loadReminder,
+  loadTimerSettings,
   restoreReminder,
   saveDarkMode,
   saveGoal,
   saveReminder,
+  saveTimerSettings,
+  toggleActionPlanItem,
 } from './settings-use-cases';
 
 function setup(file?: string) {
@@ -88,6 +102,119 @@ describe('goal domain', () => {
   });
 });
 
+describe('action plan checklist', () => {
+  it('toggles one item, persists it and leaves the others alone', () => {
+    const { repos, tick } = setup();
+    saveGoal(repos, { ...goalInput, actionPlan: 'a\nb\nc' });
+    tick();
+    const toggled = toggleActionPlanItem(repos, 1);
+    expect(parsePlanItems(toggled?.actionPlan ?? '')).toEqual([
+      { text: 'a', done: false },
+      { text: 'b', done: true },
+      { text: 'c', done: false },
+    ]);
+    expect(toggled?.updatedAt).toBeGreaterThan(0);
+    // Read back from SQLite, not from the returned object.
+    expect(parsePlanItems(loadActiveGoal(repos)?.actionPlan ?? '').map((i) => i.done)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    // And back to unchecked.
+    toggleActionPlanItem(repos, 1);
+    expect(parsePlanItems(loadActiveGoal(repos)?.actionPlan ?? '').every((i) => !i.done)).toBe(true);
+  });
+
+  it('ignores out-of-range indexes and works without a goal', () => {
+    const { repos } = setup();
+    expect(toggleActionPlanItem(repos, 0)).toBeUndefined();
+    saveGoal(repos, { ...goalInput, actionPlan: 'a' });
+    toggleActionPlanItem(repos, 5);
+    expect(parsePlanItems(loadActiveGoal(repos)?.actionPlan ?? '')).toEqual([{ text: 'a', done: false }]);
+  });
+
+  it('keeps check states through an edit when the item text is unchanged', () => {
+    const { repos } = setup();
+    saveGoal(repos, { ...goalInput, actionPlan: 'a\nb\nc' });
+    toggleActionPlanItem(repos, 0);
+    toggleActionPlanItem(repos, 2);
+    // The edit form shows plain lines (no markers) …
+    expect(planEditText(loadActiveGoal(repos)?.actionPlan ?? '')).toBe('a\nb\nc');
+    // … reword b, drop nothing, add d: a / c stay checked, b (reworded) and d start unchecked.
+    saveGoal(repos, { ...goalInput, actionPlan: 'a\nb2\nc\nd' });
+    expect(parsePlanItems(loadActiveGoal(repos)?.actionPlan ?? '')).toEqual([
+      { text: 'a', done: true },
+      { text: 'b2', done: false },
+      { text: 'c', done: true },
+      { text: 'd', done: false },
+    ]);
+    // Editing another section (title) re-submits the same plain plan and changes no state.
+    saveGoal(repos, { ...goalInput, title: '別の資格', actionPlan: 'a\nb2\nc\nd' });
+    expect(parsePlanItems(loadActiveGoal(repos)?.actionPlan ?? '').map((i) => i.done)).toEqual([
+      true,
+      false,
+      true,
+      false,
+    ]);
+  });
+
+  it('treats legacy lines without a marker as unchecked and matches duplicates in order', () => {
+    expect(parsePlanItems('x\n[x] y')).toEqual([
+      { text: 'x', done: false },
+      { text: 'y', done: true },
+    ]);
+    expect(applyPlanEdit('[x] same\n[ ] same', 'same\nsame\nsame')).toBe('[x] same\n[ ] same\n[ ] same');
+  });
+
+  it('restores the check state after an app restart', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'plan-'));
+    const file = path.join(dir, 'test.db');
+    try {
+      const first = setup(file).repos;
+      saveGoal(first, { ...goalInput, actionPlan: 'a\nb' });
+      toggleActionPlanItem(first, 1);
+      expect(parsePlanItems(loadActiveGoal(setup(file).repos)?.actionPlan ?? '')).toEqual([
+        { text: 'a', done: false },
+        { text: 'b', done: true },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('timer settings from マイページ', () => {
+  it('reads and writes the timer storage, clamped, and the summary follows', () => {
+    const { repos } = setup();
+    expect(loadTimerSettings(repos)).toEqual(DEFAULT_TIMER_SETTINGS);
+    const saved = saveTimerSettings(repos, { focusMinutes: 50, breakMinutes: 10, rounds: 3 });
+    expect(saved).toEqual({ focusMinutes: 50, breakMinutes: 10, rounds: 3 });
+    // The timer tab's own storage sees exactly the same values.
+    expect(createTimerStorage(repos).loadSettings()).toEqual(saved);
+    expect(loadMyPageSummary(repos, Date.now()).timerSummary).toBe('集中50分・休憩10分');
+    expect(describeTimerSettings(saved)).toBe('集中50分・休憩10分');
+    expect(saveTimerSettings(repos, { focusMinutes: 9999, breakMinutes: 0, rounds: 999 })).toEqual(
+      clampSettings({ focusMinutes: 9999, breakMinutes: 0, rounds: 999 }),
+    );
+  });
+
+  it('does not touch a running timer session snapshot', () => {
+    const { repos } = setup();
+    const storage = createTimerStorage(repos);
+    const running = start(
+      createIdleState(DEFAULT_TIMER_SETTINGS),
+      DEFAULT_TIMER_SETTINGS,
+      1_000,
+      () => 'session-1',
+      null,
+    );
+    storage.saveState(running);
+    saveTimerSettings(repos, { focusMinutes: 60, breakMinutes: 15, rounds: 2 });
+    expect(storage.loadState()?.settings).toEqual(DEFAULT_TIMER_SETTINGS);
+    expect(storage.loadSettings().focusMinutes).toBe(60);
+  });
+});
+
 describe('goal use cases', () => {
   it('has no goal at first', () => {
     const { repos } = setup();
@@ -99,7 +226,7 @@ describe('goal use cases', () => {
     const { repos, tick } = setup();
     const created = saveGoal(repos, goalInput);
     expect(created.title).toBe('日商簿記2級');
-    expect(created.actionPlan).toBe('平日30分、問題を解く\n週末に復習');
+    expect(created.actionPlan).toBe('[ ] 平日30分、問題を解く\n[ ] 週末に復習');
 
     tick();
     const edited = saveGoal(repos, { ...goalInput, title: '日商簿記1級' });

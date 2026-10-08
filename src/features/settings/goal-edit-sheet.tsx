@@ -8,6 +8,7 @@ import {
   formatExamDateInput,
   GOAL_LIMITS,
   parseExamDateInput,
+  planEditText,
   validateGoal,
   type GoalInput,
 } from '@/domain/goal';
@@ -48,7 +49,8 @@ export function GoalEditSheet({
         examDate: goal.examDate,
         objective: goal.objective,
         purpose: goal.purpose,
-        actionPlan: goal.actionPlan,
+        // Check markers are stored with the plan; the form edits plain lines and keeps the states.
+        actionPlan: planEditText(goal.actionPlan),
       }
     : EMPTY;
   const colors = useTheme();

@@ -87,11 +87,15 @@ export function describeFolderDeletion(
 }
 
 /** Confirmation text that matches what `folders.softDelete` actually does. */
-export function folderDeletionMessage({ questionCount, noteCount }: FolderDeletionImpact): string {
+export function folderDeletionMessage(
+  { questionCount, noteCount }: FolderDeletionImpact,
+  name: string,
+): string {
+  // Figma 08c: 「韓国語」フォルダーと、中の問題120問が削除されます。この操作は取り消せません。
   const lines = [
     questionCount > 0
-      ? `このフォルダー内の問題${questionCount}問も一緒に削除されます。`
-      : 'このフォルダーを削除します。',
+      ? `「${name}」フォルダーと、中の問題${questionCount}問が削除されます。この操作は取り消せません。`
+      : `「${name}」フォルダーが削除されます。この操作は取り消せません。`,
   ];
   if (noteCount > 0) lines.push(`ノート${noteCount}件は削除されず、フォルダー未設定になります。`);
   return lines.join('\n');

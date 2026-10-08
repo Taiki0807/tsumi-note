@@ -6,6 +6,7 @@ import { useRepositories } from '@/db/database-provider';
 import type { Goal } from '@/db/repositories';
 import type { ReminderSettings } from '@/domain/app-settings';
 import type { GoalInput } from '@/domain/goal';
+import type { TimerSettings } from '@/features/timer/timer-logic';
 
 import { shareExport } from './export-data';
 import { reminderScheduler, type ReminderResult } from './reminder-notifications';
@@ -18,7 +19,10 @@ import {
   restoreReminder,
   saveDarkMode,
   saveGoal,
+  loadTimerSettings,
   saveReminder,
+  saveTimerSettings,
+  toggleActionPlanItem,
   type MyPageSummary,
 } from './settings-use-cases';
 
@@ -60,11 +64,28 @@ export function useGoal() {
   return {
     goal,
     save: (input: GoalInput) => setGoal(saveGoal(repos, input)),
+    toggleActionItem: (index: number) => {
+      const next = toggleActionPlanItem(repos, index);
+      if (next) setGoal(next);
+    },
     remove: () => {
       deleteGoal(repos);
       setGoal(undefined);
     },
   };
+}
+
+/** Timer settings shared with the timer tab (same storage), edited from マイページ. */
+export function useTimerSettings() {
+  const repos = useRepositories();
+  const [settings, setSettings] = useState<TimerSettings>(() => loadTimerSettings(repos));
+  // Re-read on focus: the timer tab can change them too.
+  useFocusEffect(
+    useCallback(() => {
+      setSettings(loadTimerSettings(repos));
+    }, [repos]),
+  );
+  return { settings, update: (next: TimerSettings) => setSettings(saveTimerSettings(repos, next)) };
 }
 
 export function useReminderSettings() {
