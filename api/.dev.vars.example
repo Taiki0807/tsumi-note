@@ -1,0 +1,26 @@
+# ローカル開発用。`.dev.vars` にコピーして値を設定する(.dev.vars はコミットしない)。
+# 本番/ステージングは `wrangler secret put <NAME> [--env production]` で登録する。
+
+# [秘密] Better Auth の署名・暗号化鍵。32文字以上のランダム文字列
+# 生成例: openssl rand -base64 48
+BETTER_AUTH_SECRET=
+
+# [秘密] Resend の APIキー(未設定でも development ではメール送信をスキップして動作する)
+RESEND_API_KEY=
+
+# 以下は非機密。wrangler.toml の [env.development.vars] に定義済み(ローカルで上書きしたい場合のみ)
+# APP_ENV=development
+# BETTER_AUTH_URL=http://localhost:8787
+# EMAIL_FROM=つみノート <noreply@your-verified-domain>
+# APP_SCHEME=tsumi-note
+# APP_UNIVERSAL_LINK_ORIGIN=https://links.example.com  # 任意(Universal Links)
+
+# --- PR 2 以降で追加予定(PR 1 では未使用) ---
+# [秘密] Sign in with Apple
+# APPLE_CLIENT_ID=
+# APPLE_TEAM_ID=
+# APPLE_KEY_ID=
+# APPLE_PRIVATE_KEY=
+# Google ログイン
+# GOOGLE_IOS_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=

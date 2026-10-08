@@ -1,0 +1,29 @@
+{
+  "name": "tsumi-note-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --env development",
+    "check:deploy": "bun scripts/check-deploy.ts",
+    "deploy": "bun run check:deploy && wrangler deploy --env production",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply tsumi-note-db --local --env development",
+    "db:migrate:remote": "wrangler d1 migrations apply tsumi-note-db-production --remote --env production"
+  },
+  "dependencies": {
+    "@better-auth/expo": "^1.7.7",
+    "better-auth": "^1.7.7",
+    "drizzle-orm": "^0.45.3",
+    "hono": "^4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@types/bun": "latest",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "~6.0.3",
+    "wrangler": "^4"
+  }
+}
