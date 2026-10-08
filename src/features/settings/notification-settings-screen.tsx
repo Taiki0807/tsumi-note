@@ -11,7 +11,7 @@ import { useReminderSettings } from './use-settings';
 /** PRODUCT_SPEC §17 通知: 毎日の学習リマインダー + 通知時刻. Not designed in Figma → existing components. */
 export function NotificationSettingsScreen() {
   const colors = useTheme();
-  const { reminder, update } = useReminderSettings();
+  const { reminder, update, sync } = useReminderSettings();
   const [timeText, setTimeText] = useState(formatReminderTime(reminder));
   const [message, setMessage] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
@@ -104,7 +104,17 @@ export function NotificationSettingsScreen() {
             {message}
           </Text>
         ) : null}
-        {denied ? (
+        {!message && reminder.enabled && sync !== 'synced' ? (
+          <Text
+            accessibilityRole="alert"
+            style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.danger }}
+          >
+            {sync === 'permission-denied'
+              ? '通知が許可されていないため、リマインダーは届きません。端末の設定で通知を許可すると再開します。'
+              : '端末との同期に失敗しました。次回の起動時に再試行します。'}
+          </Text>
+        ) : null}
+        {denied || (reminder.enabled && sync === 'permission-denied') ? (
           <Button label="端末の設定を開く" variant="secondary" onPress={() => void Linking.openSettings()} />
         ) : null}
         <Text

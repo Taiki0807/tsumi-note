@@ -51,7 +51,9 @@ export function GoalEditSheet({
     : EMPTY;
   const colors = useTheme();
   const [title, setTitle] = useState(base.title);
-  const [examDay, setExamDay] = useState(base.examDay);
+  const [examDay, setExamDay] = useState(base.examDay ?? null);
+  // Only an explicit pick sends the exam day; otherwise the stored value (even an unresolved legacy one) is kept.
+  const [dateTouched, setDateTouched] = useState(false);
   const [pickingDate, setPickingDate] = useState(false);
   const [now] = useState(() => Date.now());
   const [objective, setObjective] = useState(base.objective);
@@ -61,7 +63,7 @@ export function GoalEditSheet({
 
   const draft: GoalInput = {
     title,
-    examDay,
+    ...(dateTouched ? { examDay } : {}),
     objective,
     purpose,
     actionPlan: plan,
@@ -88,6 +90,7 @@ export function GoalEditSheet({
           onCancel={() => setPickingDate(false)}
           onConfirm={(day) => {
             setExamDay(day);
+            setDateTouched(true);
             setPickingDate(false);
           }}
         />
@@ -144,7 +147,11 @@ export function GoalEditSheet({
                         color: examDay ? colors.textPrimary : colors.textPlaceholder,
                       }}
                     >
-                      {examDay ? formatExamDate(examDay) : '日付を選択（未定なら空欄）'}
+                      {examDay
+                        ? formatExamDate(examDay)
+                        : !dateTouched && goal && goal.examDate !== null
+                          ? '以前の受験日を確定できません。再選択してください'
+                          : '日付を選択（未定なら空欄）'}
                     </Text>
                   </Pressable>
                 </View>

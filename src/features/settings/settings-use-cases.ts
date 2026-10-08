@@ -49,10 +49,10 @@ export function toggleActionPlanItem(
 ): Goal | undefined {
   const goal = goals.getActive();
   if (!goal) return undefined;
-  const { title, examDay, objective, purpose } = goal;
+  const { title, objective, purpose } = goal;
+  // No examDay: a check-off never touches the exam day (nor an unresolved legacy value).
   return goals.save({
     title,
-    examDay,
     objective,
     purpose,
     actionPlan: togglePlanItem(goal.actionPlan, index),
@@ -87,8 +87,8 @@ function storeReminder(repos: SettingsRepos, reminder: ReminderSettings): void {
  * The OS is changed first and SQLite is written only afterwards, so the stored state never claims
  * something the OS did not do:
  * - success: the requested settings are stored.
- * - permission denied: nothing can be delivered, so the reminder is stored as off (a stale schedule is
- *   cancelled best-effort; the launch-time {@link restoreReminder} retries it).
+ * - permission denied (on a user request to enable): the stale schedule is cancelled first and off is
+ *   stored only if that succeeded; a failed cancel keeps the previous state and reports cancel-failed.
  * - schedule / cancel failed: the previous settings stay stored and shown, and the caller reports the
  *   error so the user can retry. Nothing is recorded as disabled while the OS may still hold a schedule.
  */
@@ -104,26 +104,41 @@ export async function saveReminder(
     return { ok: true, reminder: next };
   }
   if (outcome.reason === 'permission-denied') {
+    // The user just asked for ON and the OS refused: nothing may be scheduled. Off is stored only once
+    // any stale schedule is confirmed cancelled; otherwise the previous state stays and the user retries.
     const off = { ...next, enabled: false };
-    // Best-effort: if this fails the next launch retries (the stored state is "off").
-    await applyReminder(scheduler, off);
+    const cancelled = await applyReminder(scheduler, off);
+    if (!cancelled.ok) return { ok: false, reason: 'cancel-failed', reminder: previous };
     storeReminder(repos, off);
-    return { ok: false, reason: outcome.reason, reminder: off };
+    return { ok: false, reason: 'permission-denied', reminder: off };
   }
   return { ok: false, reason: outcome.reason, reminder: previous };
 }
 
 /**
- * Re-syncs the OS with the stored reminder on every launch (also after reinstall, a permission change,
- * or a failed cancel): an enabled reminder is re-registered, a disabled one is cancelled again.
- * Failures are left for the next launch / the next user action; the stored state is not rewritten.
+ * - synced: the OS matches the stored intent (scheduled when ON, cancelled when OFF).
+ * - permission-denied: the user wants it ON but the OS forbids delivery; the stale schedule is cancelled.
+ * - sync-failed: the OS could not be brought in line; retried on the next launch / foreground.
  */
-export async function restoreReminder(repos: SettingsRepos, scheduler: ReminderScheduler): Promise<void> {
+export type ReminderSyncStatus = 'synced' | 'permission-denied' | 'sync-failed';
+
+/**
+ * Re-syncs the OS with the stored reminder (launch, return to foreground, reminder screen). The stored
+ * `enabled` is the user's intent and is never rewritten here: a revoked permission is not the same as
+ * the user switching it off, so when the permission comes back the next sync schedules it again.
+ * While permission is denied the reminder's own schedule is still cancelled (best effort) so a stale
+ * schedule cannot fire after the permission returns; only the reminder identifier is touched.
+ */
+export async function restoreReminder(
+  repos: SettingsRepos,
+  scheduler: ReminderScheduler,
+): Promise<ReminderSyncStatus> {
   const reminder = loadReminder(repos);
   const outcome = await applyReminder(scheduler, reminder);
-  // A permission revoked in 設定 means nothing is delivered any more: reflect that as off.
-  if (!outcome.ok && outcome.reason === 'permission-denied')
-    storeReminder(repos, { ...reminder, enabled: false });
+  if (outcome.ok) return 'synced';
+  if (outcome.reason !== 'permission-denied') return 'sync-failed';
+  const cancelled = await applyReminder(scheduler, { ...reminder, enabled: false });
+  return cancelled.ok ? 'permission-denied' : 'sync-failed';
 }
 
 // ---------- Timer settings (Phase 2 storage, edited from マイページ) ----------

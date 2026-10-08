@@ -51,22 +51,46 @@ export function formatExamDate(examDay: string): string {
   return parsed ? `${parsed.year}年${parsed.month}月${parsed.day}日` : '';
 }
 
+export type LegacyEpochResolution =
+  | { kind: 'day'; day: string }
+  /** More than one real UTC offset yields this epoch, so the original day is not unique. */
+  | { kind: 'ambiguous'; candidates: string[] }
+  /** Not a local midnight at any real offset (corrupt / foreign value). */
+  | { kind: 'unrecoverable' };
+
+const HOUR_MS = 60 * 60 * 1000;
+/** Real-world UTC offsets range from UTC-12 to UTC+14 in 15-minute steps. */
+const MIN_OFFSET = -12 * HOUR_MS;
+const MAX_OFFSET = 14 * HOUR_MS;
+
 /**
- * Converts a legacy `exam_date` (epoch ms of the creating device's local midnight, written before
- * migration 0003) to a day. The source timezone was not stored, but a local-midnight instant encodes
- * its own UTC offset (`epoch mod 1 day`), so the original date is recovered without consulting the
- * current device timezone. Offsets from UTC-10 to UTC+12 on 15-minute steps are accepted; anything else
- * (not a local midnight, or an ambiguous UTC+13/+14 offset) returns null and the raw value stays untouched.
+ * Interprets a legacy `exam_date` (epoch ms of the creating device's local midnight, written before
+ * migration 0003). The source timezone was not stored, but a local-midnight instant encodes its own UTC
+ * offset: `epoch mod 1 day` equals `-offset mod 1 day`, so the original date is recoverable without the
+ * current device timezone, **but only when exactly one real offset fits**. Each remainder admits the
+ * offsets `o` and `o - 24h`; both are real only for remainders 10h / 11h / 12h (UTC-10 vs +14,
+ * UTC-11 vs +13, UTC-12 vs +12). Those are reported as ambiguous instead of guessing a day.
  */
-export function legacyEpochToExamDay(epoch: number): string | null {
-  if (!Number.isFinite(epoch)) return null;
+export function resolveLegacyEpoch(epoch: number): LegacyEpochResolution {
+  if (!Number.isFinite(epoch)) return { kind: 'unrecoverable' };
   const rem = ((epoch % DAY_MS) + DAY_MS) % DAY_MS;
-  if (rem % (15 * 60 * 1000) !== 0) return null;
-  let offset = (DAY_MS - rem) % DAY_MS;
-  if (offset > 12 * 60 * 60 * 1000) offset -= DAY_MS;
-  if (offset < -10 * 60 * 60 * 1000) return null;
-  const date = new Date(epoch + offset);
-  return makeExamDay(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+  if (rem % (15 * 60 * 1000) !== 0) return { kind: 'unrecoverable' };
+  const base = (DAY_MS - rem) % DAY_MS;
+  const days = [base, base - DAY_MS]
+    .filter((offset) => offset >= MIN_OFFSET && offset <= MAX_OFFSET)
+    .map((offset) => {
+      const date = new Date(epoch + offset);
+      return makeExamDay(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+    })
+    .filter((day): day is string => day !== null);
+  if (days.length === 1) return { kind: 'day', day: days[0] as string };
+  return days.length > 1 ? { kind: 'ambiguous', candidates: days } : { kind: 'unrecoverable' };
+}
+
+/** The unique original day of a legacy epoch, or null when it cannot be determined without guessing. */
+export function legacyEpochToExamDay(epoch: number): string | null {
+  const resolved = resolveLegacyEpoch(epoch);
+  return resolved.kind === 'day' ? resolved.day : null;
 }
 
 /** Month grid for the calendar: Sunday-first weeks of day numbers, 0 = padding. */

@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Appearance } from 'react-native';
+import { Appearance, AppState } from 'react-native';
 
 import { useRepositories } from '@/db/database-provider';
 import type { Goal } from '@/db/repositories';
@@ -24,6 +24,7 @@ import {
   saveTimerSettings,
   toggleActionPlanItem,
   type MyPageSummary,
+  type ReminderSyncStatus,
 } from './settings-use-cases';
 
 /** Mount once inside <DatabaseProvider>: applies the stored Light / Dark choice and restores the reminder. */
@@ -34,6 +35,11 @@ export function useApplyStoredSettings(): void {
     // 'unspecified' hands control back to the system; the existing useTheme/useColorScheme follows it.
     Appearance.setColorScheme(dark === null ? 'unspecified' : dark ? 'dark' : 'light');
     void restoreReminder(repos, reminderScheduler);
+    // Re-check when returning from 設定 (permission changes) so the OS schedule follows the stored intent.
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void restoreReminder(repos, reminderScheduler);
+    });
+    return () => subscription.remove();
   }, [repos]);
 }
 
@@ -91,13 +97,23 @@ export function useTimerSettings() {
 export function useReminderSettings() {
   const repos = useRepositories();
   const [reminder, setReminder] = useState<ReminderSettings>(() => loadReminder(repos));
+  const [sync, setSync] = useState<ReminderSyncStatus>('synced');
+  // Re-sync with the OS when the screen opens; surfaces "ON but permission denied" without changing the intent.
+  useEffect(() => {
+    let alive = true;
+    void restoreReminder(repos, reminderScheduler).then((status) => alive && setSync(status));
+    return () => {
+      alive = false;
+    };
+  }, [repos]);
   const update = async (next: ReminderSettings): Promise<ReminderResult> => {
     const result = await saveReminder(repos, reminderScheduler, next);
     // Always the state that is really stored / in effect (unchanged when the OS call failed).
     setReminder(result.reminder);
+    setSync(result.ok ? 'synced' : 'sync-failed');
     return result;
   };
-  return { reminder, update };
+  return { reminder, update, sync };
 }
 
 export function useDataExport() {

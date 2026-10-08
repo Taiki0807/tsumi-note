@@ -269,7 +269,11 @@ export function GoalScreen() {
                     color: colors.textPrimary,
                   }}
                 >
-                  {goal.examDay === null ? '未設定' : formatExamDate(goal.examDay)}
+                  {goal.examDay !== null
+                    ? formatExamDate(goal.examDay)
+                    : goal.examDate !== null
+                      ? '再選択が必要です'
+                      : '未設定'}
                 </Text>
               </View>
               {days !== null && days >= 0 ? (

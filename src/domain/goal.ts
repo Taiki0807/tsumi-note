@@ -8,8 +8,11 @@ export * from './exam-day';
 
 export type GoalInput = {
   title: string;
-  /** Exam calendar day `YYYY-MM-DD` (no time / timezone), or null when undecided. */
-  examDay: string | null;
+  /**
+   * Exam calendar day `YYYY-MM-DD` (no time / timezone), or null to clear it. `undefined` means "the
+   * exam day is not part of this update": the stored `examDay` / legacy `examDate` are kept as they are.
+   */
+  examDay?: string | null;
   objective: string;
   purpose: string;
   actionPlan: string;
@@ -27,7 +30,7 @@ export const GOAL_LIMITS = {
 export function normalizeGoal(input: GoalInput): GoalInput {
   return {
     title: input.title.trim(),
-    examDay: input.examDay,
+    ...(input.examDay !== undefined ? { examDay: input.examDay } : {}),
     objective: input.objective.trim(),
     purpose: input.purpose.trim(),
     actionPlan: parseActionPlan(input.actionPlan).join('\n'),
@@ -44,7 +47,7 @@ export function validateGoal(input: GoalInput): boolean {
     goal.purpose.length <= GOAL_LIMITS.purpose &&
     items.length <= GOAL_LIMITS.actionPlanItems &&
     items.every((item) => item.length <= GOAL_LIMITS.actionPlanItem) &&
-    (goal.examDay === null || isValidExamDay(goal.examDay))
+    (goal.examDay === undefined || goal.examDay === null || isValidExamDay(goal.examDay))
   );
 }
 

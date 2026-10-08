@@ -42,8 +42,11 @@ export function createGoalRepository({ db, now, newId }: RepositoryDeps) {
     save(input: GoalInput): Goal {
       const at = now();
       const existing = live();
-      // `examDate: null` retires the legacy epoch once the day is stored in `examDay`.
-      const values = { ...input, examDate: null };
+      // The exam day is written only when the caller says so. Then (and only then) the legacy epoch is
+      // retired; any other edit (title, 行動プラン check, ...) leaves `examDay` / `examDate` untouched.
+      const { examDay, ...rest } = input;
+      const dateValues = examDay === undefined ? {} : { examDay, examDate: null };
+      const values = { ...rest, ...dateValues };
       if (existing) {
         db.update(goals)
           .set({ ...values, updatedAt: at })
@@ -51,7 +54,15 @@ export function createGoalRepository({ db, now, newId }: RepositoryDeps) {
           .run();
         return { ...existing, ...values, updatedAt: at };
       }
-      const created: Goal = { id: newId(), createdAt: at, updatedAt: at, deletedAt: null, ...values };
+      const created: Goal = {
+        id: newId(),
+        createdAt: at,
+        updatedAt: at,
+        deletedAt: null,
+        examDay: null,
+        examDate: null,
+        ...values,
+      };
       db.insert(goals).values(created).run();
       return created;
     },
