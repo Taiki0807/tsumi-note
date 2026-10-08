@@ -83,6 +83,20 @@ function storeReminder(repos: SettingsRepos, reminder: ReminderSettings): void {
   for (const [key, value] of Object.entries(serializeReminder(reminder))) repos.settings.set(key, value);
 }
 
+let osReminderQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Single process-wide queue for every OS reminder side effect (save, restore, re-sync). The OS reminder
+ * is one shared resource (one identifier), so all hooks / screens go through it; each job reads the
+ * stored settings only when it starts, so a stale job can never overwrite a newer user change.
+ * A failing job never blocks the queue.
+ */
+export function serializeOsReminderWork<T>(job: () => Promise<T>): Promise<T> {
+  const run = osReminderQueue.then(job, job);
+  osReminderQueue = run.catch(() => undefined);
+  return run;
+}
+
 /**
  * The OS is changed first and SQLite is written only afterwards, so the stored state never claims
  * something the OS did not do:
@@ -92,7 +106,15 @@ function storeReminder(repos: SettingsRepos, reminder: ReminderSettings): void {
  * - schedule / cancel failed: the previous settings stay stored and shown, and the caller reports the
  *   error so the user can retry. Nothing is recorded as disabled while the OS may still hold a schedule.
  */
-export async function saveReminder(
+export function saveReminder(
+  repos: SettingsRepos,
+  scheduler: ReminderScheduler,
+  next: ReminderSettings,
+): Promise<ReminderResult> {
+  return serializeOsReminderWork(() => saveReminderNow(repos, scheduler, next));
+}
+
+async function saveReminderNow(
   repos: SettingsRepos,
   scheduler: ReminderScheduler,
   next: ReminderSettings,
@@ -129,10 +151,18 @@ export type ReminderSyncStatus = 'synced' | 'permission-denied' | 'sync-failed';
  * While permission is denied the reminder's own schedule is still cancelled (best effort) so a stale
  * schedule cannot fire after the permission returns; only the reminder identifier is touched.
  */
-export async function restoreReminder(
+export function restoreReminder(
   repos: SettingsRepos,
   scheduler: ReminderScheduler,
 ): Promise<ReminderSyncStatus> {
+  return serializeOsReminderWork(() => restoreReminderNow(repos, scheduler));
+}
+
+async function restoreReminderNow(
+  repos: SettingsRepos,
+  scheduler: ReminderScheduler,
+): Promise<ReminderSyncStatus> {
+  // Read inside the queue slot: a restore that waited behind a user change syncs the latest stored value.
   const reminder = loadReminder(repos);
   const outcome = await applyReminder(scheduler, reminder);
   if (outcome.ok) return 'synced';
