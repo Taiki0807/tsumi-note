@@ -3,12 +3,13 @@ import { useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, EmptyState, IconButton, SearchField } from '@/components/form-ui';
+import { Button, ConfirmDeleteSheet, EmptyState, IconButton, SearchField } from '@/components/form-ui';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 import type { Question } from '@/db/repositories';
 import { Chip, ProgressBar } from '@/features/review/review-ui';
 
 import { FolderFormSheet } from './folder-form-sheet';
+import { FolderMenuSheet } from './folder-menu-sheet';
 import { folderDeletionMessage } from './library-use-cases';
 import { incorrectPercent, type QuestionFilter, type QuestionRow } from './question-list';
 import { QuestionFormSheet } from './question-form-sheet';
@@ -120,7 +121,15 @@ function QuestionCard({ row, onPress }: { row: QuestionRow; onPress: () => void 
 }
 
 type Sheet =
-  { kind: 'none' } | { kind: 'create' } | { kind: 'edit'; question: Question } | { kind: 'rename' };
+  | { kind: 'none' }
+  | { kind: 'create' }
+  | { kind: 'edit'; question: Question }
+  | { kind: 'menu' }
+  | { kind: 'rename' }
+  | { kind: 'deleteFolder'; message: string };
+
+/** Long enough for a closing sheet (220ms) to leave before the next one is presented. */
+const SHEET_SWITCH_MS = 260;
 
 /** Figma 08 問題管理 · フォルダー内の問題一覧（フォルダー詳細）。 */
 export function FolderDetailScreen() {
@@ -174,27 +183,17 @@ export function FolderDetailScreen() {
     );
   }
 
-  const confirmDeleteFolder = () => {
-    const impact = folder.getDeletionImpact();
-    Alert.alert(`「${detail.folder.name}」を削除しますか？`, folderDeletionMessage(impact), [
-      { text: 'キャンセル', style: 'cancel' },
-      {
-        text: '削除',
-        style: 'destructive',
-        onPress: () => {
-          folder.deleteFolder();
-          router.back();
-        },
-      },
-    ]);
+  // Two modal sheets must not overlap: let the menu finish sliding out before the next one opens.
+  const switchSheet = (next: Sheet) => {
+    close();
+    setTimeout(() => setSheet(next), SHEET_SWITCH_MS);
   };
-
-  const openFolderMenu = () =>
-    Alert.alert(detail.folder.name, undefined, [
-      { text: 'フォルダー名を変更', onPress: () => setSheet({ kind: 'rename' }) },
-      { text: 'フォルダーを削除', style: 'destructive', onPress: confirmDeleteFolder },
-      { text: 'キャンセル', style: 'cancel' },
-    ]);
+  const openFolderMenu = () => setSheet({ kind: 'menu' });
+  const deleteFolderNow = () => {
+    close();
+    folder.deleteFolder();
+    router.back();
+  };
 
   const confirmDeleteQuestion = (question: Question) =>
     Alert.alert('この問題を削除しますか？', question.prompt, [
@@ -309,11 +308,30 @@ export function FolderDetailScreen() {
         onDelete={sheet.kind === 'edit' ? () => confirmDeleteQuestion(sheet.question) : undefined}
         onClose={close}
       />
+      <FolderMenuSheet
+        visible={sheet.kind === 'menu'}
+        folderName={detail.folder.name}
+        onRename={() => switchSheet({ kind: 'rename' })}
+        onDelete={() =>
+          switchSheet({
+            kind: 'deleteFolder',
+            message: folderDeletionMessage(folder.getDeletionImpact(), detail.folder.name),
+          })
+        }
+        onClose={close}
+      />
       <FolderFormSheet
         visible={sheet.kind === 'rename'}
         initialName={detail.folder.name}
         onSubmit={(name) => folder.renameFolder(name)}
         onClose={close}
+      />
+      <ConfirmDeleteSheet
+        visible={sheet.kind === 'deleteFolder'}
+        title="フォルダーを削除しますか？"
+        message={sheet.kind === 'deleteFolder' ? sheet.message : ''}
+        onCancel={close}
+        onConfirm={deleteFolderNow}
       />
     </View>
   );

@@ -33,6 +33,7 @@ import { FolderPickerSheet } from '@/features/timer/folder-picker-sheet';
 
 import { MarkdownView, NoteImage } from './markdown-view';
 import { formatNoteTime, noteDisplayTitle } from './note-format';
+import { useFolderTone } from './folder-tone';
 import { OptionSheet, type SheetOption } from './option-sheet';
 import { useNoteEditor } from './use-notes';
 
@@ -122,6 +123,7 @@ export function NoteEditorScreen() {
   const [saved, setSaved] = useState(true);
   const [editingBody, setEditingBody] = useState(body === '');
   const [pickingFolder, setPickingFolder] = useState(false);
+  const folderTone = useFolderTone(folders.findIndex((f) => f.id === folderId));
   const [sheet, setSheet] = useState<SheetName | null>(null);
   const [headingLevel, setHeadingLevel] = useState<number | undefined>(undefined);
   const selection = useRef<Selection>({ start: body.length, end: body.length });
@@ -360,11 +362,11 @@ export function NoteEditorScreen() {
                 gap: 4,
                 paddingHorizontal: 12,
                 borderRadius: radius.full,
-                backgroundColor: colors.primarySoft,
+                backgroundColor: folderTone.tile,
               }}
             >
               <Icon name="folder" size={16} color={colors.textPrimary} strokeWidth={1.8} />
-              <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}>
+              <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: folderTone.label }}>
                 {folder?.name ?? '未分類'}
               </Text>
             </Pressable>

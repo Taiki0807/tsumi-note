@@ -1,6 +1,8 @@
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 
+import { REMINDER_NOTIFICATION_ID } from '@/domain/app-settings';
+
 import type { TimerEvent, TimerState } from './timer-logic';
 import { createNotificationSynchronizer } from './timer-notification-sync';
 
@@ -33,7 +35,15 @@ export async function ensureNotificationPermission(): Promise<boolean> {
 }
 
 const synchronizer = createNotificationSynchronizer({
-  cancelAll: () => Notifications.cancelAllScheduledNotificationsAsync(),
+  // Only the timer's own notifications: the daily study reminder (Phase 7) must survive a timer reset.
+  cancelAll: async () => {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      scheduled
+        .filter(({ identifier }) => identifier !== REMINDER_NOTIFICATION_ID)
+        .map(({ identifier }) => Notifications.cancelScheduledNotificationAsync(identifier)),
+    );
+  },
   hasPermission: async () => (await Notifications.getPermissionsAsync()).granted,
   schedule: async (at, event) => {
     await Notifications.scheduleNotificationAsync({

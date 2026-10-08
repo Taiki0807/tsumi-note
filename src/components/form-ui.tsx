@@ -48,20 +48,24 @@ export function Button({
       style={{
         flex: flex ? 1 : undefined,
         height: size === 'sm' ? 36 : 56,
-        paddingHorizontal: size === 'sm' ? 16 : 32,
+        // Figma pads 32pt, but a half-width button must still fit 「キャンセル」 on a 320pt screen.
+        paddingHorizontal: size === 'sm' ? 16 : flex ? 12 : 32,
         borderRadius: radius.full,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: primary ? colors.primary : danger ? colors.dangerSoft : colors.primarySoft,
+        backgroundColor: primary ? colors.primary : danger ? colors.danger : colors.primarySoft,
         opacity: disabled ? 0.4 : 1,
         ...(primary && !disabled ? shadow.primary : null),
       }}
     >
       <Text
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.85}
         style={{
           fontFamily: fontFamily.extraBold,
           ...(size === 'sm' ? typography.label : typography.button),
-          color: primary ? colors.textOnPrimary : danger ? colors.danger : colors.primary,
+          color: primary || danger ? colors.textOnPrimary : colors.primary,
         }}
       >
         {label}
@@ -203,10 +207,13 @@ export function BottomSheet({
   visible,
   onClose,
   children,
+  gap = 20,
 }: {
   visible: boolean;
   onClose: () => void;
   children: ReactNode;
+  /** Vertical gap between sections: 20 for forms, 16 for confirmation sheets (Figma 06b / 08c). */
+  gap?: number;
 }) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
@@ -241,7 +248,7 @@ export function BottomSheet({
               maxWidth: layout.contentMaxWidth,
               // Leaves room above the sheet while the keyboard shrinks the container.
               maxHeight: '92%',
-              gap: 20,
+              gap,
               paddingTop: 12,
               paddingHorizontal: 24,
               paddingBottom: Math.max(insets.bottom, 36),
@@ -274,13 +281,69 @@ export function BottomSheet({
             keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
             style={{ flexShrink: 1 }}
-            contentContainerStyle={{ gap: 20 }}
+            contentContainerStyle={{ gap }}
           >
             {children}
           </ScrollView>
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+/**
+ * Figma 06b / 08c 削除（確認）: bottom sheet with a 56pt danger badge, title, consequence text and
+ * キャンセル / 削除する. Scrim tap and the grabber swipe dismiss it like every other sheet.
+ */
+export function ConfirmDeleteSheet({
+  visible,
+  title,
+  message,
+  confirmLabel = '削除する',
+  onCancel,
+  onConfirm,
+}: {
+  visible: boolean;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const colors = useTheme();
+  return (
+    <BottomSheet visible={visible} onClose={onCancel} gap={16}>
+      <View
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.dangerSoft,
+        }}
+      >
+        <Icon name="trash" size={28} color={colors.danger} strokeWidth={2} />
+      </View>
+      <Text
+        accessibilityRole="header"
+        style={{
+          fontFamily: fontFamily.extraBold,
+          ...typography.heading,
+          lineHeight: 30,
+          color: colors.textPrimary,
+        }}
+      >
+        {title}
+      </Text>
+      <Text style={{ fontFamily: fontFamily.bold, ...typography.bodySm, color: colors.textSecondary }}>
+        {message}
+      </Text>
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <Button label="キャンセル" variant="secondary" flex onPress={onCancel} />
+        <Button label={confirmLabel} variant="danger" flex onPress={onConfirm} />
+      </View>
+    </BottomSheet>
   );
 }
 

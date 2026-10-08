@@ -27,7 +27,14 @@ export type IconName =
   | 'link'
   | 'code'
   | 'image'
-  | 'eye';
+  | 'eye'
+  | 'bell'
+  | 'moon'
+  | 'shield'
+  | 'edit'
+  | 'trash'
+  | 'calendar'
+  | 'star';
 
 type Props = {
   name: IconName;
@@ -162,10 +169,39 @@ export function Icon({ name, size, color, strokeWidth = 2, handsColor }: Props) 
           <Circle cx={12} cy={12} r={3} {...common} />
         </>
       )}
+      {name === 'bell' && (
+        <>
+          <Path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" {...common} />
+          <Path d="M10 21h4" {...common} />
+        </>
+      )}
+      {name === 'moon' && <Path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z" {...common} />}
+      {name === 'shield' && <Path d="M12 3l7 2.6v6.4c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V5.6z" {...common} />}
+      {name === 'edit' && (
+        <>
+          <Path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z" {...common} />
+          <Path d="M13.5 6.5l4 4" {...common} />
+        </>
+      )}
+      {name === 'trash' && (
+        <>
+          <Path d="M4 7h16M9 7V4h6v3" {...common} />
+          <Path d="M6 7l1 13h10l1-13" {...common} />
+        </>
+      )}
+      {name === 'calendar' && (
+        <>
+          <Rect x={4} y={5.5} width={16} height={14.5} rx={2.5} {...common} />
+          <Path d="M4 10.5h16M8 3.5v3M16 3.5v3" {...common} />
+        </>
+      )}
+      {name === 'star' && (
+        <Path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8L3.5 9.7l5.9-.9z" {...common} />
+      )}
       {name === 'user' && (
         <>
           <Circle cx={12} cy={8} r={4} {...common} />
-          <Path d="M4 21c0-4 3.5-6 8-6s8 2 8 6" {...common} />
+          <Path d="M4.5 20.5c0-3 3.2-5.5 7.5-5.5s7.5 2.5 7.5 5.5" {...common} />
         </>
       )}
     </Svg>

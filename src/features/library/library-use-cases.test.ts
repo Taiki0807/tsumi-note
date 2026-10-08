@@ -49,15 +49,13 @@ describe('library use cases', () => {
 
   it('describes deletion for every question / note combination', () => {
     const noteLine = 'ノート2件は削除されず、フォルダー未設定になります。';
-    expect(folderDeletionMessage({ questionCount: 0, noteCount: 0 })).toBe('このフォルダーを削除します。');
-    expect(folderDeletionMessage({ questionCount: 3, noteCount: 0 })).toBe(
-      'このフォルダー内の問題3問も一緒に削除されます。',
-    );
-    expect(folderDeletionMessage({ questionCount: 0, noteCount: 2 })).toBe(
-      `このフォルダーを削除します。\n${noteLine}`,
-    );
-    expect(folderDeletionMessage({ questionCount: 3, noteCount: 2 })).toBe(
-      `このフォルダー内の問題3問も一緒に削除されます。\n${noteLine}`,
+    const none = '「韓国語」フォルダーが削除されます。この操作は取り消せません。';
+    const withQuestions = '「韓国語」フォルダーと、中の問題3問が削除されます。この操作は取り消せません。';
+    expect(folderDeletionMessage({ questionCount: 0, noteCount: 0 }, '韓国語')).toBe(none);
+    expect(folderDeletionMessage({ questionCount: 3, noteCount: 0 }, '韓国語')).toBe(withQuestions);
+    expect(folderDeletionMessage({ questionCount: 0, noteCount: 2 }, '韓国語')).toBe(`${none}\n${noteLine}`);
+    expect(folderDeletionMessage({ questionCount: 3, noteCount: 2 }, '韓国語')).toBe(
+      `${withQuestions}\n${noteLine}`,
     );
   });
 

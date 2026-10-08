@@ -60,7 +60,10 @@ export const questions = sqliteTable(
 export const goals = sqliteTable('goals', {
   ...mutableColumns,
   title: text('title').notNull(),
+  /** Legacy (before migration 0003): epoch ms of local midnight. Read-only; superseded by `examDay`. */
   examDate: integer('exam_date'),
+  /** Calendar day `YYYY-MM-DD`, independent of the device timezone. */
+  examDay: text('exam_day'),
   objective: text('objective').notNull().default(''),
   purpose: text('purpose').notNull().default(''),
   actionPlan: text('action_plan').notNull().default(''),

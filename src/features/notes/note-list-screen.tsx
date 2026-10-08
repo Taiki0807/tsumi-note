@@ -8,21 +8,10 @@ import { EmptyState, IconButton, SearchField } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 
+import { useFolderTone } from './folder-tone';
 import { formatNoteTime, noteDisplayTitle } from './note-format';
 import type { NoteRow } from './note-use-cases';
 import { useNoteList } from './use-notes';
-
-/** Figma 03: tile / folder label colors cycle primary → warning → success per folder. */
-function useRowColors(folderIndex: number) {
-  const c = useTheme();
-  if (folderIndex < 0) return { tile: c.surfaceMuted, icon: c.textSecondary, label: c.textSecondary };
-  const variants = [
-    { tile: c.primarySoft, icon: c.primary, label: c.primary },
-    { tile: c.warningSoft, icon: c.warning, label: c.warningText },
-    { tile: c.successSoft, icon: c.success, label: c.successText },
-  ] as const;
-  return variants[folderIndex % 3] ?? variants[0];
-}
 
 function NoteListRow({
   row,
@@ -36,7 +25,7 @@ function NoteListRow({
   onMenu: () => void;
 }) {
   const colors = useTheme();
-  const tone = useRowColors(row.folderIndex);
+  const tone = useFolderTone(row.folderIndex);
   const title = noteDisplayTitle(row.note.title);
   return (
     <View
