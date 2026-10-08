@@ -89,7 +89,9 @@ function SectionCard({
         backgroundColor: palette.bg,
       }}
     >
-      <View style={{ height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+      <View
+        style={{ height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+      >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Icon name={icon} size={18} color={palette.icon} strokeWidth={iconStrokeWidth} />
           <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: palette.text }}>
@@ -157,7 +159,7 @@ export function GoalScreen() {
     setEditing(section);
   };
   const [now] = useState(() => Date.now());
-  const days = goal ? daysUntilExam(goal.examDate, now) : null;
+  const days = goal ? daysUntilExam(goal.examDay, now) : null;
   const plan = goal ? parsePlanItems(goal.actionPlan) : [];
 
   return (
@@ -212,7 +214,12 @@ export function GoalScreen() {
             }}
           >
             <View
-              style={{ height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+              style={{
+                height: 44,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
             >
               <Text
                 style={{
@@ -256,30 +263,49 @@ export function GoalScreen() {
                   受験予定日
                 </Text>
                 <Text
-                  style={{ fontFamily: fontFamily.extraBold, ...typography.button, color: colors.textPrimary }}
+                  style={{
+                    fontFamily: fontFamily.extraBold,
+                    ...typography.button,
+                    color: colors.textPrimary,
+                  }}
                 >
-                  {goal.examDate === null ? '未設定' : formatExamDate(goal.examDate)}
+                  {goal.examDay === null ? '未設定' : formatExamDate(goal.examDay)}
                 </Text>
               </View>
               {days !== null && days >= 0 ? (
                 <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
                   <Text
-                    style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}
+                    style={{
+                      fontFamily: fontFamily.bold,
+                      ...typography.caption,
+                      color: colors.textSecondary,
+                    }}
                   >
                     あと
                   </Text>
                   <Text
-                    style={{ fontFamily: fontFamily.numeric, fontSize: 22, lineHeight: 26, color: colors.primary }}
+                    style={{
+                      fontFamily: fontFamily.numeric,
+                      fontSize: 22,
+                      lineHeight: 26,
+                      color: colors.primary,
+                    }}
                   >
                     {days}
                   </Text>
-                  <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}>
+                  <Text
+                    style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}
+                  >
                     日
                   </Text>
                 </View>
               ) : days !== null ? (
                 <Text
-                  style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.textSecondary }}
+                  style={{
+                    fontFamily: fontFamily.extraBold,
+                    ...typography.label,
+                    color: colors.textSecondary,
+                  }}
                 >
                   受験日を過ぎました
                 </Text>
@@ -322,7 +348,9 @@ export function GoalScreen() {
             onEdit={() => edit('plan')}
           >
             {plan.length === 0 ? (
-              <Text style={{ fontFamily: fontFamily.extraBold, ...typography.body, color: colors.textPrimary }}>
+              <Text
+                style={{ fontFamily: fontFamily.extraBold, ...typography.body, color: colors.textPrimary }}
+              >
                 未設定
               </Text>
             ) : (

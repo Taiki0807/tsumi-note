@@ -34,25 +34,42 @@ export const reminderScheduler: ReminderScheduler = {
   },
 };
 
+export type ReminderFailure = 'permission-denied' | 'schedule-failed' | 'cancel-failed';
+
+/** `reminder` is always the state that is actually stored / in effect, so callers never show a guess. */
 export type ReminderResult =
-  { ok: true; reminder: ReminderSettings } | { ok: false; reason: 'permission-denied' | 'schedule-failed' };
+  | { ok: true; reminder: ReminderSettings }
+  | { ok: false; reason: ReminderFailure; reminder: ReminderSettings };
+
+export type OsOutcome = { ok: true } | { ok: false; reason: ReminderFailure };
 
 /**
- * Applies reminder settings to the OS. Turning it on requires permission; on denial nothing is
- * scheduled and the caller keeps the reminder off. The timer never depends on this.
+ * Applies reminder settings to the OS and reports whether the OS really reached the requested state.
+ * Turning it on requires permission; on denial nothing is scheduled. Only the reminder's own
+ * identifier is touched, so timer notifications are never cancelled. The timer never depends on this.
  */
 export async function applyReminder(
   scheduler: ReminderScheduler,
   reminder: ReminderSettings,
-): Promise<ReminderResult> {
-  try {
-    if (!reminder.enabled) {
+): Promise<OsOutcome> {
+  if (!reminder.enabled) {
+    try {
       await scheduler.cancel();
-      return { ok: true, reminder };
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: 'cancel-failed' };
     }
-    if (!(await scheduler.ensurePermission())) return { ok: false, reason: 'permission-denied' };
+  }
+  let granted: boolean;
+  try {
+    granted = await scheduler.ensurePermission();
+  } catch {
+    granted = false;
+  }
+  if (!granted) return { ok: false, reason: 'permission-denied' };
+  try {
     await scheduler.schedule(reminder.hour, reminder.minute);
-    return { ok: true, reminder };
+    return { ok: true };
   } catch {
     return { ok: false, reason: 'schedule-failed' };
   }

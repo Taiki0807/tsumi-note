@@ -15,7 +15,6 @@ import {
   daysUntilExam,
   formatExamDate,
   parseActionPlan,
-  parseExamDateInput,
   parsePlanItems,
   planEditText,
   validateGoal,
@@ -23,12 +22,7 @@ import {
 } from '@/domain/goal';
 import { DEFAULT_REVIEW_SETTINGS } from '@/domain/review-settings';
 import { saveReviewSettings } from '@/features/review/review-use-cases';
-import {
-  clampSettings,
-  createIdleState,
-  DEFAULT_TIMER_SETTINGS,
-  start,
-} from '@/features/timer/timer-logic';
+import { clampSettings, createIdleState, DEFAULT_TIMER_SETTINGS, start } from '@/features/timer/timer-logic';
 import { createTimerStorage } from '@/features/timer/timer-storage';
 
 import { buildExportJson } from './export-data';
@@ -56,7 +50,7 @@ function setup(file?: string) {
 
 const goalInput: GoalInput = {
   title: ' 日商簿記2級 ',
-  examDate: new Date(2026, 10, 15).getTime(),
+  examDay: '2026-11-15',
   objective: '試験に合格する',
   purpose: '業務を理解する',
   actionPlan: '平日30分、問題を解く\n\n 週末に復習 ',
@@ -82,21 +76,20 @@ describe('goal domain', () => {
     expect(validateGoal({ ...goalInput })).toBe(true);
     expect(validateGoal({ ...goalInput, title: '   ' })).toBe(false);
     expect(validateGoal({ ...goalInput, title: 'a'.repeat(61) })).toBe(false);
-    expect(validateGoal({ ...goalInput, examDate: null })).toBe(true);
+    expect(validateGoal({ ...goalInput, examDay: null })).toBe(true);
+    expect(validateGoal({ ...goalInput, examDay: '2026-02-30' })).toBe(false);
   });
 
-  it('parses plan lines and exam dates', () => {
+  it('parses plan lines and formats exam days', () => {
     expect(parseActionPlan('a\n\n b \n')).toEqual(['a', 'b']);
-    expect(parseExamDateInput('2026-11-15')).toBe(new Date(2026, 10, 15).getTime());
-    expect(parseExamDateInput('2026-02-30')).toBeNull();
-    expect(parseExamDateInput('abc')).toBeNull();
-    expect(formatExamDate(new Date(2026, 10, 15).getTime())).toBe('2026年11月15日');
+    expect(formatExamDate('2026-11-15')).toBe('2026年11月15日');
+    expect(formatExamDate('2026-12-05')).toBe('2026年12月5日');
   });
 
   it('counts calendar days (Figma: あと52日 from 2026-09-24 to 2026-11-15)', () => {
-    const exam = new Date(2026, 10, 15, 0, 0).getTime();
+    const exam = '2026-11-15';
     expect(daysUntilExam(exam, new Date(2026, 8, 24, 23, 59).getTime())).toBe(52);
-    expect(daysUntilExam(exam, exam)).toBe(0);
+    expect(daysUntilExam(exam, new Date(2026, 10, 15, 0, 0).getTime())).toBe(0);
     expect(daysUntilExam(exam, new Date(2026, 10, 16).getTime())).toBe(-1);
     expect(daysUntilExam(null, 0)).toBeNull();
   });
@@ -308,7 +301,11 @@ describe('settings', () => {
     const { repos } = setup();
     const fake = fakeScheduler(false);
     const result = await saveReminder(repos, fake.scheduler, { enabled: true, hour: 8, minute: 0 });
-    expect(result).toEqual({ ok: false, reason: 'permission-denied' });
+    expect(result).toEqual({
+      ok: false,
+      reason: 'permission-denied',
+      reminder: { enabled: false, hour: 8, minute: 0 },
+    });
     expect(fake.scheduled).toHaveLength(0);
     expect(loadReminder(repos)).toEqual({ enabled: false, hour: 8, minute: 0 });
   });

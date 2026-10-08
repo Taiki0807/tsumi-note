@@ -2,10 +2,14 @@
  * Goal (PRODUCT_SPEC §8 / Figma 06 目標): v1 manages a single active goal.
  * 資格 / 試験名, 受験日, 目標, 目的, 行動プラン. The action plan is stored as one item per line.
  */
+import { isValidExamDay } from './exam-day';
+
+export * from './exam-day';
+
 export type GoalInput = {
   title: string;
-  /** Epoch ms of the exam day (local midnight), or null when undecided. */
-  examDate: number | null;
+  /** Exam calendar day `YYYY-MM-DD` (no time / timezone), or null when undecided. */
+  examDay: string | null;
   objective: string;
   purpose: string;
   actionPlan: string;
@@ -23,7 +27,7 @@ export const GOAL_LIMITS = {
 export function normalizeGoal(input: GoalInput): GoalInput {
   return {
     title: input.title.trim(),
-    examDate: input.examDate,
+    examDay: input.examDay,
     objective: input.objective.trim(),
     purpose: input.purpose.trim(),
     actionPlan: parseActionPlan(input.actionPlan).join('\n'),
@@ -40,7 +44,7 @@ export function validateGoal(input: GoalInput): boolean {
     goal.purpose.length <= GOAL_LIMITS.purpose &&
     items.length <= GOAL_LIMITS.actionPlanItems &&
     items.every((item) => item.length <= GOAL_LIMITS.actionPlanItem) &&
-    (goal.examDate === null || Number.isFinite(goal.examDate))
+    (goal.examDay === null || isValidExamDay(goal.examDay))
   );
 }
 
@@ -99,39 +103,4 @@ export function togglePlanItem(stored: string, index: number): string {
   const item = items[index];
   if (!item) return serializePlanItems(items);
   return serializePlanItems(items.map((it, i) => (i === index ? { ...it, done: !it.done } : it)));
-}
-
-export function startOfLocalDay(at: number): number {
-  const date = new Date(at);
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-}
-
-/** Calendar days from `now`'s date to the exam date (0 = today, negative = passed); null without a date. */
-export function daysUntilExam(examDate: number | null, now: number): number | null {
-  if (examDate === null) return null;
-  const DAY = 24 * 60 * 60 * 1000;
-  return Math.round((startOfLocalDay(examDate) - startOfLocalDay(now)) / DAY);
-}
-
-/** Figma: 2026年11月15日 */
-export function formatExamDate(examDate: number): string {
-  const date = new Date(examDate);
-  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-}
-
-/** Parses `YYYY-MM-DD` (and `YYYY/M/D`) as a real local date; null when empty or not a valid date. */
-export function parseExamDateInput(text: string): number | null {
-  const match = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(text.trim());
-  if (!match) return null;
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const date = new Date(year, month - 1, day);
-  const valid = date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
-  return valid ? date.getTime() : null;
-}
-
-export function formatExamDateInput(examDate: number | null): string {
-  if (examDate === null) return '';
-  const date = new Date(examDate);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `goals` ADD `exam_day` text;

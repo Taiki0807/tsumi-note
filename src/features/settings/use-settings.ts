@@ -93,7 +93,8 @@ export function useReminderSettings() {
   const [reminder, setReminder] = useState<ReminderSettings>(() => loadReminder(repos));
   const update = async (next: ReminderSettings): Promise<ReminderResult> => {
     const result = await saveReminder(repos, reminderScheduler, next);
-    setReminder(result.ok ? result.reminder : { ...next, enabled: false });
+    // Always the state that is really stored / in effect (unchanged when the OS call failed).
+    setReminder(result.reminder);
     return result;
   };
   return { reminder, update };

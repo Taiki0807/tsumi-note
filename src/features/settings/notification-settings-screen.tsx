@@ -29,7 +29,9 @@ export function NotificationSettingsScreen() {
       setMessage(
         result.reason === 'permission-denied'
           ? '通知が許可されていません。端末の設定で通知を許可してください。'
-          : 'リマインダーを設定できませんでした。',
+          : result.reason === 'cancel-failed'
+            ? 'リマインダーをオフにできませんでした。設定は変更されていません。もう一度お試しください。'
+            : 'リマインダーを設定できませんでした。設定は変更されていません。もう一度お試しください。',
       );
     }
   };
