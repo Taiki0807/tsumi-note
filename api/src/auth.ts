@@ -99,7 +99,10 @@ export function createAuth(deps: AuthDeps) {
     emailVerification: {
       sendOnSignUp: true,
       sendOnSignIn: true,
-      autoSignInAfterVerification: true,
+      // 確認後に自動ログインしない。Expoプラグインはカスタムschemeへの遷移URLにSet-Cookieを
+      // cookieクエリとして付与し、同じschemeを登録した別アプリにセッションが漏れるため。
+      // 確認後はアプリで改めてログインさせる
+      autoSignInAfterVerification: false,
       expiresIn: TOKEN_TTL_SECONDS,
       sendVerificationEmail: async ({ user, url }) => {
         await queue(deps.sendEmail({ to: user.email, ...verificationEmail(url) }));

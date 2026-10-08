@@ -104,3 +104,7 @@ PR 5 以降: R2 binding(`IMAGES`)。
 | Secrets | `.dev.vars` | `wrangler secret put --env production` |
 | メール | スキップ可 | Resend 必須 |
 | iOS実機から開発APIへ | `BETTER_AUTH_URL` を端末から到達可能なURLにする(例: LAN IP / トンネル) | 独自ドメイン |
+
+## 8. メール確認後の再ログイン
+
+`emailVerification.autoSignInAfterVerification` は `false` のままにしてください。`true` にすると、確認後のカスタムURL Schemeへの遷移URLにセッションCookieが付与され、同じschemeを登録した別アプリに漏れます。確認後はアプリで改めてログインする仕様です。

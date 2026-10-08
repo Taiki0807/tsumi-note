@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkProductionConfig } from '../scripts/check-deploy';
+import { stripCredentialsFromRedirect } from '../src/app';
 import { createAuth } from '../src/auth';
 import { createRedirectPolicy, parseAppEnvironment } from '../src/redirect-policy';
 import { EMAIL, PASSWORD, createHarness, signUp } from './harness';
@@ -361,6 +362,98 @@ describe('Expoネイティブ認証(Origin検証とredirectToの分離)', () => 
     const devOrigin = { 'expo-origin': 'exp://192.168.0.5:8081' };
     expect((await post(createHarness(PROD), 'sign-in/email', body, devOrigin)).status).toBe(403);
     expect((await post(createHarness(), 'sign-in/email', body, devOrigin)).status).not.toBe(403);
+  });
+});
+
+describe('メール確認・再設定でセッションが漏れない', () => {
+  const expo = { 'expo-origin': 'tsumi-note://' };
+  const leak = /cookie|session|token|bearer/i;
+  const sessions = (h: ReturnType<typeof createHarness>) =>
+    h.sqlite.query('SELECT COUNT(*) AS n FROM session').get();
+
+  for (const [name, opts] of [
+    ['production', PROD],
+    ['development', {}],
+  ] as const) {
+    test(`確認リンクで自動ログインせず、遷移先に認証情報がない(${name})`, async () => {
+      const h = createHarness(opts);
+      await h.request('/api/auth/sign-up/email', {
+        body: { email: EMAIL, password: PASSWORD, name: 'L', callbackURL: 'tsumi-note://verified' },
+        headers: expo,
+      });
+      const res = await openLink(h, h.lastLink());
+      expect(res.headers.get('set-cookie')).toBeNull();
+      expect(res.headers.get('location')).toBe('tsumi-note://verified');
+      expect(res.headers.get('location') ?? '').not.toMatch(leak);
+      expect(sessions(h)).toEqual({ n: 0 });
+      const inn = await h.request('/api/auth/sign-in/email', {
+        body: { email: EMAIL, password: PASSWORD },
+        headers: expo,
+      });
+      expect(inn.status).toBe(200);
+    });
+  }
+
+  test('未確認ユーザーはログインできない', async () => {
+    const h = createHarness(PROD);
+    await h.request('/api/auth/sign-up/email', {
+      body: { email: EMAIL, password: PASSWORD, name: 'L' },
+      headers: expo,
+    });
+    const inn = await h.request('/api/auth/sign-in/email', {
+      body: { email: EMAIL, password: PASSWORD },
+      headers: expo,
+    });
+    expect(inn.status).toBe(403);
+    expect(sessions(h)).toEqual({ n: 0 });
+  });
+
+  test('確認リンクを再利用してもCookieが付与されない', async () => {
+    const h = createHarness(PROD);
+    await h.request('/api/auth/sign-up/email', {
+      body: { email: EMAIL, password: PASSWORD, name: 'L', callbackURL: 'tsumi-note://verified' },
+      headers: expo,
+    });
+    const link = h.lastLink();
+    for (const r of [await openLink(h, link), await openLink(h, link)]) {
+      expect(r.headers.get('set-cookie')).toBeNull();
+      expect(r.headers.get('location') ?? '').not.toMatch(/[?&]cookie=/);
+    }
+  });
+
+  test('再設定リンクはtokenのみを渡し、セッションを発行しない', async () => {
+    const h = createHarness(PROD);
+    await registerVerified(h);
+    await h.request('/api/auth/request-password-reset', {
+      body: { email: EMAIL, redirectTo: 'tsumi-note://reset-password' },
+      headers: expo,
+    });
+    const res = await openLink(h, h.lastLink());
+    const loc = new URL(res.headers.get('location') ?? '');
+    expect([...loc.searchParams.keys()]).toEqual(['token']);
+    expect(res.headers.get('set-cookie')).toBeNull();
+    await h.request('/api/auth/reset-password', {
+      body: { newPassword: 'another-note-2026', token: loc.searchParams.get('token') },
+      headers: expo,
+    });
+    expect(sessions(h)).toEqual({ n: 0 });
+  });
+
+  test('stripCredentialsFromRedirect は Set-Cookie と cookie クエリを除去する', () => {
+    const res = stripCredentialsFromRedirect(
+      new Response(null, {
+        status: 302,
+        headers: { location: 'tsumi-note://verified?cookie=abc&x=1', 'set-cookie': 'a=b' },
+      }),
+    );
+    expect(res.headers.get('set-cookie')).toBeNull();
+    expect(res.headers.get('location')).toBe('tsumi-note://verified?x=1');
+  });
+
+  test('autoSignInAfterVerification は無効のまま', () => {
+    expect(readFileSync(join(ROOT, 'src', 'auth.ts'), 'utf8')).toContain(
+      'autoSignInAfterVerification: false',
+    );
   });
 });
 
