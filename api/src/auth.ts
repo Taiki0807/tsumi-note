@@ -76,7 +76,8 @@ export function createAuth(deps: AuthDeps) {
     secret: deps.secret,
     baseURL: deps.baseURL,
     database: drizzleAdapter(deps.db, { provider: 'sqlite', schema }),
-    // 許可する遷移先の完全一致URLのみ(development のみ exp:// を追加)。最終判断は下の before hook
+    // Origin検証用の `<scheme>://` と完全一致の遷移先URL(development のみ exp:// を追加)。
+    // Better Auth は遷移先にも同じ一覧を使うため、遷移先の最終判断は下の before hook で行う
     trustedOrigins: redirects.trustedOrigins,
     plugins: [expo()],
     emailAndPassword: {
@@ -121,6 +122,8 @@ export function createAuth(deps: AuthDeps) {
       // Cloudflare が付与するヘッダーのみ信頼する(x-forwarded-for は偽装可能)
       ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] },
       useSecureCookies: isProduction,
+      // NODE_ENV=test で Origin 検証が暗黙に無効化されるのを防ぎ、常に有効にする
+      disableOriginCheck: false,
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {

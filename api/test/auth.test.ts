@@ -142,7 +142,10 @@ describe('ログイン', () => {
     const login = await signIn(h);
     const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
     expect((await h.request('/v1/me', { headers: { cookie } })).status).toBe(200);
-    const out = await h.request('/api/auth/sign-out', { body: {}, headers: { cookie } });
+    const out = await h.request('/api/auth/sign-out', {
+      body: {},
+      headers: { cookie, 'expo-origin': 'tsumi-note://' },
+    });
     expect(out.status).toBe(200);
     expect((await h.request('/v1/me', { headers: { cookie } })).status).toBe(401);
   });
@@ -234,19 +237,21 @@ describe('パスワード変更', () => {
     const h = createHarness();
     await registerVerified(h);
     const cookie = (await signIn(h)).headers.get('set-cookie')!.split(';')[0]!;
+    // Cookie付きのPOSTはOrigin検証の対象(Expoクライアントは常にexpo-originを送る)
+    const headers = { cookie, 'expo-origin': 'tsumi-note://' };
     const weak = await h.request('/api/auth/change-password', {
       body: { currentPassword: PASSWORD, newPassword: 'weak' },
-      headers: { cookie },
+      headers,
     });
     expect(weak.status).toBe(400);
     const wrongCurrent = await h.request('/api/auth/change-password', {
       body: { currentPassword: 'not-my-password-1', newPassword: 'brand-new-pass-77' },
-      headers: { cookie },
+      headers,
     });
     expect(wrongCurrent.status).toBe(400);
     const ok = await h.request('/api/auth/change-password', {
       body: { currentPassword: PASSWORD, newPassword: 'brand-new-pass-77' },
-      headers: { cookie },
+      headers,
     });
     expect(ok.status).toBe(200);
     expect((await signIn(h, 'brand-new-pass-77')).status).toBe(200);

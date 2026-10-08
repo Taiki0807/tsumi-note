@@ -24,7 +24,13 @@ const DEV_HOST =
   /^(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}):\d{1,5}$/;
 
 export type RedirectPolicy = {
-  /** Better Auth の trustedOrigins 用(完全一致URL。最終判断は isAllowedRedirect) */
+  /**
+   * Better Auth の trustedOrigins 用。次の2種類を含む。
+   * - リクエストの Origin 検証用: アプリ自身の Origin(`<scheme>://`。Expo クライアントが expo-origin として送る値)
+   * - 完全一致のリダイレクト先URL
+   * Better Auth は Origin とリダイレクト先に同じ一覧を使うため、`<scheme>://` はリダイレクト先としても
+   * 通ってしまう。リダイレクト先の最終判断は必ず isAllowedRedirect(auth.ts の before hook)で行う。
+   */
   trustedOrigins: string[];
   isAllowedRedirect: (url: unknown) => boolean;
 };
@@ -71,7 +77,7 @@ export function createRedirectPolicy(opts: {
   }
 
   return {
-    trustedOrigins: [...exact, ...(environment === 'development' ? ['exp://'] : [])],
+    trustedOrigins: [`${appScheme}://`, ...exact, ...(environment === 'development' ? ['exp://'] : [])],
     isAllowedRedirect,
   };
 }

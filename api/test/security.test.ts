@@ -276,6 +276,94 @@ describe('デプロイ設定', () => {
   });
 });
 
+describe('Expoネイティブ認証(Origin検証とredirectToの分離)', () => {
+  const expo = { 'expo-origin': 'tsumi-note://' };
+  const post = (h: ReturnType<typeof createHarness>, path: string, body: unknown, headers = expo) =>
+    h.request(`/api/auth/${path}`, { body, headers });
+
+  test('expo-origin(tsumi-note://)で登録・確認・ログインが成功する', async () => {
+    const h = createHarness(PROD);
+    const up = await post(h, 'sign-up/email', {
+      email: EMAIL,
+      password: PASSWORD,
+      name: 'Learner',
+      callbackURL: 'tsumi-note://verified',
+    });
+    expect(up.status).toBe(200);
+    // 確認前はログインできない
+    expect((await post(h, 'sign-in/email', { email: EMAIL, password: PASSWORD })).status).toBe(403);
+    const resend = await post(h, 'send-verification-email', {
+      email: EMAIL,
+      callbackURL: 'tsumi-note://verified',
+    });
+    expect(resend.status).toBe(200);
+    const res = await openLink(h, h.lastLink());
+    expect(res.headers.get('location') ?? '').toStartWith('tsumi-note://verified');
+    const inn = await post(h, 'sign-in/email', { email: EMAIL, password: PASSWORD });
+    expect(inn.status).toBe(200);
+  });
+
+  test('アプリ以外のOriginは拒否される(本番・開発とも)', async () => {
+    for (const h of [createHarness(PROD), createHarness()]) {
+      for (const origin of ['evil://', 'https://evil.example', 'tsumi-note.evil://']) {
+        const res = await post(
+          h,
+          'sign-in/email',
+          { email: EMAIL, password: PASSWORD },
+          { 'expo-origin': origin },
+        );
+        expect(res.status).toBe(403);
+      }
+    }
+  });
+
+  test('正規Originでも、任意のredirectToは拒否されトークン・メールは作られない', async () => {
+    const h = createHarness(PROD);
+    await registerVerified(h);
+    const before = h.sent.length;
+    for (const redirectTo of ['tsumi-note://evil/steal', 'tsumi-note://', 'https://evil.example/']) {
+      const res = await post(h, 'request-password-reset', { email: EMAIL, redirectTo });
+      expect(res.status).toBe(403);
+    }
+    expect(h.sent).toHaveLength(before);
+    expect(
+      h.sqlite.query("SELECT COUNT(*) AS n FROM verification WHERE identifier LIKE 'reset-password:%'").get(),
+    ).toEqual({ n: 0 });
+  });
+
+  test('パスワード再設定フローが正規Originと正規redirectToで動作する', async () => {
+    const h = createHarness(PROD);
+    await registerVerified(h);
+    const req = await post(h, 'request-password-reset', {
+      email: EMAIL,
+      redirectTo: 'tsumi-note://reset-password',
+    });
+    expect(req.status).toBe(200);
+    const loc = (await openLink(h, h.lastLink())).headers.get('location') ?? '';
+    expect(loc).toStartWith('tsumi-note://reset-password?token=');
+    const token = new URL(loc).searchParams.get('token');
+    const reset = await post(h, 'reset-password', { newPassword: 'another-note-2026', token });
+    expect(reset.status).toBe(200);
+    const inn = await post(h, 'sign-in/email', { email: EMAIL, password: 'another-note-2026' });
+    expect(inn.status).toBe(200);
+  });
+
+  test('redirectToを省略した場合の既定の遷移先はAPI自身(同一オリジン)のみ', async () => {
+    const h = createHarness(PROD);
+    await registerVerified(h);
+    await post(h, 'request-password-reset', { email: EMAIL });
+    const loc = (await openLink(h, h.lastLink())).headers.get('location') ?? '';
+    expect(loc.startsWith('https://api.tsumi.test/') || loc.startsWith('/')).toBe(true);
+  });
+
+  test('exp:// のOriginは開発のみ許可され、本番では拒否される', async () => {
+    const body = { email: EMAIL, password: PASSWORD };
+    const devOrigin = { 'expo-origin': 'exp://192.168.0.5:8081' };
+    expect((await post(createHarness(PROD), 'sign-in/email', body, devOrigin)).status).toBe(403);
+    expect((await post(createHarness(), 'sign-in/email', body, devOrigin)).status).not.toBe(403);
+  });
+});
+
 // createAuth を直接使う型の確認(未使用警告の回避ではなく、公開シグネチャの回帰)
 test('createAuthはenvironment必須', () => {
   expect(typeof createAuth).toBe('function');

@@ -69,6 +69,10 @@ PR 5 以降: R2 binding(`IMAGES`)。
 - **リダイレクト先は完全一致の許可リストのみ**(`api/src/redirect-policy.ts`)。`callbackURL` / `redirectTo` / `errorCallbackURL` / `newUserCallbackURL` は
   `tsumi-note://reset-password` と `tsumi-note://verified`(および任意設定の Universal Link `<APP_UNIVERSAL_LINK_ORIGIN>/auth/<path>`)以外は 403 で拒否し、メール送信もトークン発行もしない。
   `%` エンコード・userinfo・大文字小文字違い・末尾スラッシュ・query/fragment 付きも拒否する。PR 2 のアプリ側 deep link はこの2つに合わせる。
+- **Origin とリダイレクト先の分離**: `@better-auth/expo` は `expo-origin`(= `tsumi-note://`)を `Origin` に設定し、Better Auth は
+  `Origin` もリダイレクト先も同じ `trustedOrigins` で検証する。そのため `trustedOrigins` には `tsumi-note://` を含めるが、
+  これだけでは `tsumi-note://evil/steal` も通ってしまう。リダイレクト先は `before` hook(`isAllowedRedirect`)が完全一致で必ず再検証する(hook を外してはならない)。
+  `disableOriginCheck: false` を明示し、`NODE_ENV=test` でも Origin 検証が有効になるようにしている。Cookie 付きのPOSTは `Origin` が必須(クライアントは常に `expo-origin` を送る)。
 - **Universal Links の評価**: カスタムURL Schemeは他アプリが同じSchemeを登録すると再設定トークンを奪われる余地が残る。
   本番では Universal Links(HTTPS + `apple-app-site-association`)への移行を推奨する。`APP_UNIVERSAL_LINK_ORIGIN` を設定すると
   `https://<origin>/auth/reset-password` 等を許可できる(AASA配置・Associated Domains はPR 2 以降で対応。未確認)。
