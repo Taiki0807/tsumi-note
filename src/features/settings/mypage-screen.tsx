@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
 import { Icon, type IconName } from '@/components/icons';
-import { fontFamily, layout, radius, typography, useTheme } from '@/design';
+import { fontFamily, layout, lightColors, radius, typography, useTheme } from '@/design';
 import { splitDuration } from '@/features/records/records-logic';
 import { TimerSettingsModal } from '@/features/timer/timer-settings-modal';
 
@@ -188,7 +188,7 @@ export function MyPageScreen() {
                 ノート{summary.noteCount}件・問題{summary.questionCount}問・学習時間{' '}
                 {formatStudyTime(summary.studySeconds)}を、iPhone と iPad のどちらでも使えます。
               </Text>
-              {/* Phase 8 (Account / Sync): no auth is implemented yet, so the button stays disabled. */}
+              {/* Figma Button/アカウントを作成: white fill and primary text in both themes (fixed Figma values), 44pt, full radius. Phase 8 (Account / Sync): no auth yet, so it stays inert. */}
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ disabled: true }}
@@ -200,8 +200,7 @@ export function MyPageScreen() {
                   justifyContent: 'center',
                   paddingHorizontal: 20,
                   borderRadius: radius.full,
-                  backgroundColor: colors.surface,
-                  opacity: 0.5,
+                  backgroundColor: lightColors.surface,
                 }}
               >
                 <Text
@@ -209,7 +208,7 @@ export function MyPageScreen() {
                     fontFamily: fontFamily.extraBold,
                     ...typography.body,
                     lineHeight: 22,
-                    color: colors.primary,
+                    color: lightColors.primary,
                   }}
                 >
                   アカウントを作成
