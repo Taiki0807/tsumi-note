@@ -3,7 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { GUEST_IMAGE_DIRECTORY, imageDirectoryForOwner, type OwnerId } from '@/db/ownership';
 
-import { copyImageFiles } from './copy-images';
+import { copyImageFilesExclusive } from './copy-images';
 import type { ImageFiles } from './note-images';
 
 /**
@@ -31,23 +31,27 @@ export async function copyGuestImagesToAccount(account: OwnerId): Promise<number
   if (account === null) return 0;
   const from = imageDirectory(GUEST_IMAGE_DIRECTORY);
   const to = imageDirectory(imageDirectoryForOwner(account));
-  const partialName = (fileName: string) => `${fileName}.partial`;
+  // Fresh File objects each time: `move()` re-points the object it is called on.
+  const at = (name: string, suffix?: 'partial' | 'backup') =>
+    new File(to, suffix ? `${name}.${suffix}` : name);
   const sizeOf = (file: File) => (file.exists ? (file.size ?? undefined) : undefined);
-  return copyImageFiles({
+  const remove = (file: File) => {
+    if (file.exists) file.delete();
+  };
+  // No `overwrite` option anywhere: expo deletes the target before moving, so each move targets a free name.
+  return copyImageFilesExclusive({
     listSource: () => from.list().filter((e): e is File => e instanceof File).map((e) => e.name),
     sourceSize: (name) => new File(from, name).size ?? -1,
-    destinationSize: (name) => sizeOf(new File(to, name)),
-    copyToPartial: (name) => new File(from, name).copy(new File(to, partialName(name))),
-    partialSize: (name) => sizeOf(new File(to, partialName(name))),
-    promote: (name) => new File(to, partialName(name)).move(new File(to, name)),
-    discardPartial: (name) => {
-      const partial = new File(to, partialName(name));
-      if (partial.exists) partial.delete();
-    },
-    removeDestination: (name) => {
-      const file = new File(to, name);
-      if (file.exists) file.delete();
-    },
+    destinationSize: (name) => sizeOf(at(name)),
+    partialSize: (name) => sizeOf(at(name, 'partial')),
+    backupSize: (name) => sizeOf(at(name, 'backup')),
+    copyToPartial: (name) => new File(from, name).copy(at(name, 'partial')),
+    moveDestinationToBackup: (name) => at(name).move(at(name, 'backup')),
+    promotePartial: (name) => at(name, 'partial').move(at(name)),
+    restoreBackup: (name) => at(name, 'backup').move(at(name)),
+    discardPartial: (name) => remove(at(name, 'partial')),
+    discardBackup: (name) => remove(at(name, 'backup')),
+    discardDestination: (name) => remove(at(name)),
   });
 }
 
@@ -57,7 +61,9 @@ export const noteImageFiles: ImageFiles = {
     imageDirectory()
       .list()
       .filter((entry): entry is File => entry instanceof File)
-      .map((file) => file.name),
+      .map((file) => file.name)
+      // `.partial` / `.backup` belong to an import; the orphan sweep must not delete a recoverable backup.
+      .filter((name) => !/\.(partial|backup)$/.test(name)),
   save: async (sourceUri, fileName) => {
     await new File(sourceUri).copy(new File(imageDirectory(), fileName));
   },
