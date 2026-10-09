@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "usesAppleSignIn": true,
-      "bundleIdentifier": "com.taiki0807.tsuminote"
+      "bundleIdentifier": "dev.hosokawalab.tsuminote"
     },
     "web": {
       "bundler": "metro",
