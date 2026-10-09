@@ -54,7 +54,7 @@ export function GuestImportGate() {
     setStep({ name: 'importing' });
     try {
       const outcome = await withGuestDatabase(async (guest) =>
-        runGuestImport({
+        await runGuestImport({
           guest,
           account: db,
           guestDatabaseName: GUEST_DATABASE_NAME,

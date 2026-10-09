@@ -31,38 +31,83 @@ describe('guest import prompt and execution', () => {
     expect(snap(account).notes).toHaveLength(0);
   });
 
-  it('imports once, then no longer asks', () => {
+  it('keeps decisions independent per account database', async () => {
+    const guest = guestWithNote();
+    const accountA = createTestDatabase();
+    const accountB = createTestDatabase();
+    declineGuestImport(accountA, GUEST, 1);
+    expect(needsImportPrompt(guest, accountA, GUEST)).toBe(false);
+    expect(needsImportPrompt(guest, accountB, GUEST)).toBe(true);
+
+    const outcome = await runGuestImport({
+      guest,
+      account: accountB,
+      guestDatabaseName: GUEST,
+      copyImages: async () => 0,
+      now: () => 5,
+    });
+    expect(outcome.ok).toBe(true);
+    expect(readTransferDecision(accountB, GUEST)).toBe('imported');
+    expect(readTransferDecision(accountA, GUEST)).toBe('declined');
+  });
+
+  it('imports once, then no longer asks', async () => {
     const guest = guestWithNote();
     const account = createTestDatabase();
-    const outcome = runGuestImport({
+    const outcome = await runGuestImport({
       guest,
       account,
       guestDatabaseName: GUEST,
-      copyImages: () => 0,
+      copyImages: async () => 0,
       now: () => 5,
     });
     expect(outcome.ok).toBe(true);
     expect(needsImportPrompt(guest, account, GUEST)).toBe(false);
   });
 
-  it('a failed image copy marks nothing as imported and can be retried', () => {
+  it('a failed image copy marks nothing as imported and can be retried', async () => {
     const guest = guestWithNote();
     const account = createTestDatabase();
     const base = { guest, account, guestDatabaseName: GUEST, now: () => 5 };
+    const rows = () => createRepositories({ ...createTestDeps(account).deps }).exporter.snapshot().notes;
 
-    const failed = runGuestImport({ ...base, copyImages: () => 2 });
+    const failed = await runGuestImport({ ...base, copyImages: async () => 2 });
     expect(failed).toEqual({ ok: false, reason: 'images' });
     expect(readTransferDecision(account, GUEST)).toBeUndefined();
     expect(needsImportPrompt(guest, account, GUEST)).toBe(true);
+    expect(rows()).toHaveLength(0);
 
-    const thrown = runGuestImport({
+    const rejected = await runGuestImport({
       ...base,
-      copyImages: () => {
-        throw new Error('disk full');
-      },
+      copyImages: () => Promise.reject(new Error('disk full')),
     });
-    expect(thrown.ok).toBe(false);
+    expect(rejected.ok).toBe(false);
+    expect(rows()).toHaveLength(0);
 
-    expect(runGuestImport({ ...base, copyImages: () => 0 }).ok).toBe(true);
+    expect((await runGuestImport({ ...base, copyImages: async () => 0 })).ok).toBe(true);
+    expect(rows()).toHaveLength(1);
+    expect(readTransferDecision(account, GUEST)).toBe('imported');
+  });
+
+  it('does not touch the database until the image copy has settled', async () => {
+    const guest = guestWithNote();
+    const account = createTestDatabase();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const pending = runGuestImport({
+      guest,
+      account,
+      guestDatabaseName: GUEST,
+      copyImages: async () => {
+        await gate;
+        return 0;
+      },
+      now: () => 5,
+    });
+    await Promise.resolve();
+    expect(readTransferDecision(account, GUEST)).toBeUndefined();
+    release();
+    expect((await pending).ok).toBe(true);
+    expect(readTransferDecision(account, GUEST)).toBe('imported');
   });
 });

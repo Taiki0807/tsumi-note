@@ -12,7 +12,7 @@ export type ImportDeps = {
   account: AppDatabase;
   guestDatabaseName: string;
   /** Copies guest note images into the account directory; returns how many files failed. Never deletes. */
-  copyImages: () => number;
+  copyImages: () => Promise<number>;
   now: () => number;
 };
 
@@ -29,14 +29,16 @@ export type ImportOutcome =
   { ok: true; result: TransferResult } | { ok: false; reason: 'images' | 'database'; error?: unknown };
 
 /**
- * Explicit, user-confirmed import. Images are copied first (idempotent, files only) so a failure leaves
- * nothing marked as imported and the whole thing can be retried; then rows are copied atomically.
+ * Explicit, user-confirmed import. Files and rows cannot be committed atomically together, so the order
+ * is: (1) await every image copy (size-verified, idempotent); (2) only if all succeeded, copy rows and
+ * record the `imported` marker in one transaction. A failed image therefore never leaves rows that
+ * reference a missing file or an `imported` marker; a retry reuses the finished files.
  * Neither the guest database nor the guest images are changed.
  */
-export function runGuestImport(deps: ImportDeps): ImportOutcome {
+export async function runGuestImport(deps: ImportDeps): Promise<ImportOutcome> {
   let failedImages: number;
   try {
-    failedImages = deps.copyImages();
+    failedImages = await deps.copyImages();
   } catch (error) {
     return { ok: false, reason: 'images', error };
   }

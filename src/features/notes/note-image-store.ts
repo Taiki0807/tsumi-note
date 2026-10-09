@@ -3,6 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { GUEST_IMAGE_DIRECTORY, imageDirectoryForOwner, type OwnerId } from '@/db/ownership';
 
+import { copyImageFiles } from './copy-images';
 import type { ImageFiles } from './note-images';
 
 /**
@@ -26,22 +27,28 @@ function imageDirectory(name: string = activeDirectoryName): Directory {
  * Copies the guest's note images into the account's directory (never moves or deletes the originals).
  * Existing files with the same name are kept. Returns the number of files that could not be copied.
  */
-export function copyGuestImagesToAccount(account: OwnerId): number {
+export async function copyGuestImagesToAccount(account: OwnerId): Promise<number> {
   if (account === null) return 0;
   const from = imageDirectory(GUEST_IMAGE_DIRECTORY);
   const to = imageDirectory(imageDirectoryForOwner(account));
-  let failed = 0;
-  for (const entry of from.list()) {
-    if (!(entry instanceof File)) continue;
-    const target = new File(to, entry.name);
-    if (target.exists) continue;
-    try {
-      entry.copy(target);
-    } catch {
-      failed += 1;
-    }
-  }
-  return failed;
+  const partialName = (fileName: string) => `${fileName}.partial`;
+  const sizeOf = (file: File) => (file.exists ? (file.size ?? undefined) : undefined);
+  return copyImageFiles({
+    listSource: () => from.list().filter((e): e is File => e instanceof File).map((e) => e.name),
+    sourceSize: (name) => new File(from, name).size ?? -1,
+    destinationSize: (name) => sizeOf(new File(to, name)),
+    copyToPartial: (name) => new File(from, name).copy(new File(to, partialName(name))),
+    partialSize: (name) => sizeOf(new File(to, partialName(name))),
+    promote: (name) => new File(to, partialName(name)).move(new File(to, name)),
+    discardPartial: (name) => {
+      const partial = new File(to, partialName(name));
+      if (partial.exists) partial.delete();
+    },
+    removeDestination: (name) => {
+      const file = new File(to, name);
+      if (file.exists) file.delete();
+    },
+  });
 }
 
 /** expo-file-system implementation of {@link ImageFiles}. */
