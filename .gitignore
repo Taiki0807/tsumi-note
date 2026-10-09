@@ -1,16 +1,94 @@
+# ==========================================
+# Dependencies
+# ==========================================
 node_modules/
+
+# ==========================================
+# Expo / React Native
+# ==========================================
 .expo/
 dist/
 web-build/
 expo-env.d.ts
-.scratch/
-*.log
-.DS_Store
+*.tsbuildinfo
+
+# ==========================================
+# Environment variables / Secrets
+# ==========================================
 .env
 .env.*
-
-# Cloudflare Workers (api/)
-.dev.vars
-.wrangler/
 !.env.example
+
+# Cloudflare Workers
+.dev.vars
+.dev.vars.*
 !.dev.vars.example
+
+# Secret keys / certificates
+*.p8
+*.p12
+*.mobileprovision
+*.keystore
+*.jks
+*.pem
+*.key
+
+# ==========================================
+# iOS / Xcode
+# ==========================================
+# Expo prebuild generated project
+/ios/
+
+# Backups created during native project regeneration
+/ios-backup/
+/ios-backup-*/
+
+# Xcode local files
+*.xcuserstate
+xcuserdata/
+DerivedData/
+*.xcarchive
+*.ipa
+
+# CocoaPods (when ios/ is tracked intentionally)
+Pods/
+
+# ==========================================
+# Cloudflare Workers
+# ==========================================
+.wrangler/
+
+# ==========================================
+# SQLite / Local databases
+# ==========================================
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+
+# ==========================================
+# Logs / Temporary files
+# ==========================================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun-debug.log*
+.scratch/
+.tmp/
+tmp/
+*.tmp
+
+# ==========================================
+# OS / Editor
+# ==========================================
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo

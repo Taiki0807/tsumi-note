@@ -15,4 +15,8 @@ export type Bindings = {
   APP_SCHEME: string;
   /** Universal Links 用のHTTPS origin(任意。設定すると `<origin>/auth/<path>` も遷移先に許可) */
   APP_UNIVERSAL_LINK_ORIGIN?: string;
+  /** Sign in with Apple を有効にするアプリの Bundle ID(未設定ならApple無効) */
+  APPLE_APP_BUNDLE_ID?: string;
+  /** Google OAuth の iOS クライアントID(カンマ区切りで複数可。未設定ならGoogle無効) */
+  GOOGLE_CLIENT_IDS?: string;
 };

@@ -30,6 +30,10 @@ export default {
         waitUntil,
         environment: env.APP_ENV,
         universalLinkOrigin: env.APP_UNIVERSAL_LINK_ORIGIN,
+        appleBundleId: env.APPLE_APP_BUNDLE_ID || undefined,
+        googleClientIds: env.GOOGLE_CLIENT_IDS?.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
       }),
     );
     return app.fetch(request, env, ctx);

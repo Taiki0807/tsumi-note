@@ -10,7 +10,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.taiki0807.tsuminote"
+      "usesAppleSignIn": true,
+      "bundleIdentifier": "dev.hosokawalab.tsuminote"
     },
     "web": {
       "bundler": "metro",
@@ -35,7 +36,10 @@
             "backgroundColor": "#6949ff"
           }
         }
-      ]
+      ],
+      "expo-apple-authentication",
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
