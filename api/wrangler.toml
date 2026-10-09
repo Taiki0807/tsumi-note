@@ -16,17 +16,17 @@ name = "tsumi-note-api-development"
 [env.development.vars]
 APP_ENV = "development"
 BETTER_AUTH_URL = "http://localhost:8787"
-EMAIL_FROM = "つみノート <noreply@example.invalid>"
+EMAIL_FROM = "つみノート <noreply@hosokawa-lab.dev>"
 APP_SCHEME = "tsumi-note"
 # app.json の ios.bundleIdentifier。Apple の設定(Capability)自体は未確認
-APPLE_APP_BUNDLE_ID = "com.taiki0807.tsuminote"
+APPLE_APP_BUNDLE_ID = "dev.hosokawalab.tsuminote"
 # Google の iOS クライアントID(カンマ区切り)。発行後に設定する。未設定なら Google ログインは無効
 # GOOGLE_CLIENT_IDS = ""
 [[env.development.d1_databases]]
 binding = "DB"
 database_name = "tsumi-note-db"
 # `wrangler d1 create tsumi-note-db` の出力値に置き換える(未設定)
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "2aed7628-a4ed-405e-adb6-3b3660c95f4a"
 migrations_dir = "migrations"
 
 # ---- 本番環境 ----
@@ -38,7 +38,7 @@ APP_ENV = "production"
 BETTER_AUTH_URL = "https://api.example.invalid"
 EMAIL_FROM = "つみノート <noreply@example.invalid>"
 APP_SCHEME = "tsumi-note"
-APPLE_APP_BUNDLE_ID = "com.taiki0807.tsuminote"
+APPLE_APP_BUNDLE_ID = "dev.hosokawalab.tsuminote"
 # GOOGLE_CLIENT_IDS = ""
 # Universal Links を使う場合のみ設定(例: "https://links.example.com")。
 # APP_UNIVERSAL_LINK_ORIGIN = ""
