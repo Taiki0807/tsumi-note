@@ -18,6 +18,7 @@ import { SplashView } from '@/components/splash-view';
 import { DatabaseProvider } from '@/db/database-provider';
 import { useTheme } from '@/design';
 import { AuthProvider } from '@/features/auth/auth-context';
+import { GuestImportGate } from '@/features/auth/guest-import-gate';
 import { useApplyStoredSettings } from '@/features/settings/use-settings';
 
 // Keep the native splash until fonts are loaded, then hand over to <SplashView/> while the DB migrates.
@@ -31,7 +32,10 @@ function AppStack() {
   const colors = useTheme();
   useApplyStoredSettings();
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
+    <>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
+      <GuestImportGate />
+    </>
   );
 }
 
@@ -55,19 +59,19 @@ export default function RootLayout() {
     <View style={{ flex: 1, backgroundColor: SPLASH_BACKGROUND }}>
       <SafeAreaProvider>
         <StatusBar style="auto" />
-        <DatabaseProvider
-          fallback={<SplashView />}
-          renderError={(error) => (
-            <Text style={{ color: colors.danger, padding: 24 }} accessibilityRole="alert">
-              データベースの初期化に失敗しました: {error.message}
-            </Text>
-          )}
-        >
-          {/* ゲストでも全機能を使えるよう、認証状態の読み込みでアプリの表示を止めない */}
-          <AuthProvider>
+        {/* ゲストでも全機能を使えるよう、ログインは強制しない。DBは認証状態に応じて切り替わる */}
+        <AuthProvider>
+          <DatabaseProvider
+            fallback={<SplashView />}
+            renderError={(error) => (
+              <Text style={{ color: colors.danger, padding: 24 }} accessibilityRole="alert">
+                データベースの初期化に失敗しました: {error.message}
+              </Text>
+            )}
+          >
             <AppStack />
-          </AuthProvider>
-        </DatabaseProvider>
+          </DatabaseProvider>
+        </AuthProvider>
       </SafeAreaProvider>
     </View>
   );

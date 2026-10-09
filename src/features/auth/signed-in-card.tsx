@@ -40,7 +40,7 @@ export function SignedInCard({ email }: { email: string }) {
         {email}
       </Text>
       <Notice tone="info">
-        ログイン中です。端末間の同期とデータの引き継ぎは今後のアップデートで有効になります。この端末の学習データは削除されません。
+        ログイン中です。この端末では、アカウント専用の保存領域を使っています。端末間の同期は今後のアップデートで有効になります。ゲストのデータは削除されません。
       </Notice>
       {error ? <Notice tone="error">{error}</Notice> : null}
       <Button

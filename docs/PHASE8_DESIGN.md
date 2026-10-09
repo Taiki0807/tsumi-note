@@ -20,8 +20,8 @@ Source of Truth: `docs/PRODUCT_SPEC.md`(機能) / `docs/ARCHITECTURE.md`(技術)
 | PR | 内容 | 状態 |
 |---|---|---|
 | 1 | 基盤構築(Workers/Hono/D1)＋メール認証 | **実装済み(レビュー待ち)** |
-| 2 | Apple / Google認証＋認証画面 | 未着手(PR 1 のレビュー・確認後) |
-| 3 | アカウント別DB切替＋ゲストデータ引き継ぎ | 未着手 |
+| 2 | Apple / Google認証＋認証画面 | **マージ済み(#18)** |
+| 3 | アカウント別DB切替＋ゲストデータ引き継ぎ | **実装済み(レビュー待ち)** |
 | 4 | 差分同期 | 未着手 |
 | 5 | ノート画像同期 | 未着手 |
 | 6 | マイページ・ログアウト・アカウント削除 | 未着手 |
@@ -40,8 +40,50 @@ Source of Truth: `docs/PRODUCT_SPEC.md`(機能) / `docs/ARCHITECTURE.md`(技術)
 ## 2. ローカルデータ所有モデル(決定: アカウント別SQLiteファイル)
 
 - ゲスト: `tsumi-note.db`(現行ファイルをそのまま使用。**移行不要・既存データに一切触れない**)。画像は現行の `note-images/`。
-- アカウント: `accounts/<accountKey>/tsumi-note.db`、画像は `accounts/<accountKey>/note-images/`。
-  `accountKey = sha256(userId)` の先頭を用い、ファイル名に生のuserIdやメールを使わない。
+- アカウント(PR 3 の実装): `tsumi-note-acct-<hex(userId)>.db`、画像は `note-images-acct-<hex(userId)>/`(いずれも `documentDirectory` 直下)。
+  `hex` はuserIdの各文字コードの16進表記で、メール・表示名は使わない。iOSは大文字小文字を区別しないため大文字小文字違いのIDが衝突しないようにしている。userIdは `^[A-Za-z0-9_-]{1,128}# Phase 8 設計書（アカウント認証・クラウド同期）
+
+ステータス: **設計確定(2026-10-08 Issue #16 での決定事項を反映)**。実装はPR単位で進める。
+Source of Truth: `docs/PRODUCT_SPEC.md`(機能) / `docs/ARCHITECTURE.md`(技術) / Figma(Visual)。
+外部サービスの設定手順: `docs/PHASE8_SETUP.md`。
+
+最優先事項は **既存の学習データを失わないこと**。
+
+## 0. 決定事項と進行状況
+
+| # | 決定 | 内容 |
+|---|---|---|
+| 1 | PR分割 | 下表の6分割。原則として前のPRがマージされてから次へ進む |
+| 2 | 所有モデル | アカウント別SQLiteファイル方式(§2) |
+| 3 | 競合 | 競合コピー方式(§4.4) |
+| 4 | 変更検知 | Outboxテーブル方式(§4.3) |
+| 5 | 画像 | マッピングテーブル方式。既存ファイル名・Markdown参照は書き換えない(§5) |
+| 6 | アカウント連携 | v1は連携機能なし。メール一致による自動統合なし。将来連携できるデータモデル(§6) |
+
+| PR | 内容 | 状態 |
+|---|---|---|
+| 1 | 基盤構築(Workers/Hono/D1)＋メール認証 | **実装済み(レビュー待ち)** |
+| 2 | Apple / Google認証＋認証画面 | **マージ済み(#18)** |
+| 3 | アカウント別DB切替＋ゲストデータ引き継ぎ | **実装済み(レビュー待ち)** |
+| 4 | 差分同期 | 未着手 |
+| 5 | ノート画像同期 | 未着手 |
+| 6 | マイページ・ログアウト・アカウント削除 | 未着手 |
+
+## 1. 現状調査の要約
+
+- ローカルDB: expo-sqlite + Drizzle。`src/db/schema.ts`、migrationは `drizzle/0000`〜`0003`。
+- Mutable: `folders` `notes` `questions` `goals`(id/createdAt/updatedAt/deletedAt)、`settings`(key主キー、deletedAtあり)、`fsrs_states`(questionId主キー、現在状態のみ。deletedAtなし)。
+- Append-only: `study_sessions` `answer_history` `review_history`。
+- `sync_metadata`(key/value)は未使用のプレースホルダー。
+- owner/account列は未導入(schema.ts冒頭コメントでPhase 8に決定を委ねている)。
+- ノート画像: `<documentDirectory>/note-images/` にファイル保存(`note-image-store.ts`)。Markdown本文から `note-image://<fileName>` で参照。
+- Expo設定: bundle identifier `dev.hosokawalab.tsuminote`、URL scheme `tsumi-note`(`app.json`)。
+- ARCHITECTURE §15 は「認証実装前に Anonymous Data / Account-owned Data / ownerId / Logout後のLocal Data の扱いを正式決定する」と定めている → 本書の§2。
+
+## 2. ローカルデータ所有モデル(決定: アカウント別SQLiteファイル)
+
+- ゲスト: `tsumi-note.db`(現行ファイルをそのまま使用。**移行不要・既存データに一切触れない**)。画像は現行の `note-images/`。
+ のみ受け付け、それ以外はゲスト扱い(`src/db/ownership.ts`)。
 - ログアウトしても各DBは削除しない(再ログインで高速復帰)。別アカウントは別ファイルのため **物理的に閲覧不可**。
 - アカウント切替時: ①同期ワーカー停止 ②DBハンドルclose ③画面のキャッシュ(クエリ・状態)破棄 ④画像参照ルート切替 ⑤新DBを開いて同期再開。切替処理は単一のAccountContextに集約し、旧アカウントのハンドルが画面に残らないようにする。
 - 案B(全テーブルに `ownerId`)は、クエリの条件漏れが漏洩になり既存機能の書き換えが大きいため不採用。
@@ -182,3 +224,11 @@ UIを実装するPR 2 以降では、Node IDが得られない画面を**未デ�
 - 端末内DBの暗号化は行わない(§2)。
 - `@better-auth/expo` のアプリ組み込み、Workers実環境、メール配信は未確認。
 - D1にはトランザクションAPIの制約があり、同期のバッチ処理は `D1.batch` ベースの設計が必要(PR 4 で詳細化)。
+
+## PR 3 実装メモ: アカウント別DBとゲスト引き継ぎ
+
+- **DB選択**: `AuthProvider` の内側の `DatabaseProvider` が認証状態から所有者を決める(`src/db/resolve-owner.ts`)。signedIn=アカウントDB、signedOut=ゲストDB、loading=前回確定した所有者(Keychainの不透明なID。無ければゲスト)。ログアウトでヒントを削除。サブツリーは DB名を `key` にして再マウントするため、前の所有者の画面・フック・状態は残らない。旧接続は新DBが有効になった後に閉じる。認証失敗時は状態が変わらないためDBも変わらない。
+- **引き継ぎ**(`src/db/guest-transfer.ts`, `run-guest-import.ts`): ユーザーが「引き継ぐ」を選んだ場合のみ実行。ゲストDBは別接続で読み取り、アカウントDBへ **1トランザクション** で `INSERT ... ON CONFLICT DO NOTHING` する。IDと参照関係を維持し、既存の行・設定は上書きしない。単一アクティブ目標(v1)を守るため、アカウントに既に目標がある場合はゲストの目標をコピーしない。再実行しても重複しない。ゲストDB・ゲスト画像は変更・削除しない。
+- **確認**: ゲストにデータがあり、そのアカウントで未決定の場合のみ表示(新規/既存アカウント共通)。選択は「引き継ぐ」「引き継がない(以後たずねない)」「あとで(記録せず次回再表示)」。決定は `sync_metadata`(`guest_import:<ゲストDB名>`)に保存。
+- **画像**: 先にゲストの画像ファイルをアカウント用ディレクトリへコピー(同名はスキップ)。1つでも失敗したらDBは触らず「未引き継ぎ」のまま再試行できる。Markdownの参照・ファイル名は変更しない。
+- **PR 4 への準備**: 既存の `createdAt/updatedAt/deletedAt`、追記型履歴は変更していない。同期・D1への送信は未実装。
