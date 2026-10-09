@@ -8,7 +8,7 @@ PR 1(基盤＋メール認証)で必要な設定と、PR 2 以降で必要にな
 
 | 項目 | 値 | 出典 |
 |---|---|---|
-| iOS Bundle Identifier | `com.taiki0807.tsuminote` | `app.json` `expo.ios.bundleIdentifier` |
+| iOS Bundle Identifier | `dev.hosokawalab.tsuminote` | `app.json` `expo.ios.bundleIdentifier` |
 | URL Scheme | `tsumi-note` | `app.json` `expo.scheme` |
 | Expo SDK | 57 / React Native 0.86 | `package.json` |
 
@@ -30,7 +30,7 @@ Apple Developer 側の App ID がこの Bundle Identifier で登録済みかは�
 
 | 名前 | 種別 | 用途 | 設定場所 |
 |---|---|---|---|
-| `APPLE_APP_BUNDLE_ID` | 非機密 | 設定するとSign in with Appleが有効。IDトークンの audience として検証する(`com.taiki0807.tsuminote`) | `wrangler.toml` `[vars]`(環境ごと) |
+| `APPLE_APP_BUNDLE_ID` | 非機密 | 設定するとSign in with Appleが有効。IDトークンの audience として検証する(`dev.hosokawalab.tsuminote`) | `wrangler.toml` `[vars]`(環境ごと) |
 | `GOOGLE_CLIENT_IDS` | 非機密 | 設定するとGoogleログインが有効。iOSクライアントID(カンマ区切りで複数可)。IDトークンの audience として検証する | 同上 |
 
 どちらも未設定ならそのプロバイダーは無効。ネイティブのIDトークン方式のみを使うため、Apple の `.p8` / client secret や Google の client secret は**不要**(API は保持しない)。
@@ -100,7 +100,7 @@ PR 5 以降: R2 binding(`IMAGES`)。
 `POST /api/auth/sign-in/social` に `idToken` を送る。API は Apple の公開鍵・issuer・audience(`APPLE_APP_BUNDLE_ID`)・nonce を検証する。
 
 1. Apple Developer Program に加入済みであることを確認。
-2. Certificates, Identifiers & Profiles → Identifiers → App ID(`com.taiki0807.tsuminote`)で **Sign in with Apple** Capability を有効化。
+2. Certificates, Identifiers & Profiles → Identifiers → App ID(`dev.hosokawalab.tsuminote`)で **Sign in with Apple** Capability を有効化。
 3. アプリ側: `app.json` に `ios.usesAppleSignIn: true` と `expo-apple-authentication` プラグインを設定済み。**Expo Go では動かない**ため、Development Build(`expo prebuild` + EAS Build など)が必要。Provisioning Profile の再生成が必要になる場合がある。
 4. ネイティブのみのため Services ID・`.p8` Key・client secret は不要(Web/Androidフローを使う場合のみ必要)。
 5. API の `APPLE_APP_BUNDLE_ID` に Bundle ID を設定する。
@@ -113,7 +113,7 @@ PR 5 以降: R2 binding(`IMAGES`)。
 (`idToken` なしの `/sign-in/social`、`/callback/*`、`/link-social` は 400/404)。API は Google の公開鍵・issuer・audience(`GOOGLE_CLIENT_IDS`)・nonce を検証する。
 
 1. Google Cloud Console でプロジェクト作成 → OAuth同意画面(アプリ名・サポートメール・プライバシーポリシーURL等)。
-2. 認証情報 → OAuth クライアントID → 種類「iOS」、Bundle ID に `com.taiki0807.tsuminote` を指定。
+2. 認証情報 → OAuth クライアントID → 種類「iOS」、Bundle ID に `dev.hosokawalab.tsuminote` を指定。
 3. 発行された iOS クライアントIDを、アプリの `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` と API の `GOOGLE_CLIENT_IDS` の両方に設定する。
    リダイレクトURI(`com.googleusercontent.apps.<id>:/oauthredirect`)の URL scheme は `app.config.ts` が自動で Info.plist に登録する(Development Build の再ビルドが必要)。
 4. client secret は不要(iOSクライアントはPKCEを使用)。

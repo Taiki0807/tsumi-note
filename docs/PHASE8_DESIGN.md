@@ -34,7 +34,7 @@ Source of Truth: `docs/PRODUCT_SPEC.md`(機能) / `docs/ARCHITECTURE.md`(技術)
 - `sync_metadata`(key/value)は未使用のプレースホルダー。
 - owner/account列は未導入(schema.ts冒頭コメントでPhase 8に決定を委ねている)。
 - ノート画像: `<documentDirectory>/note-images/` にファイル保存(`note-image-store.ts`)。Markdown本文から `note-image://<fileName>` で参照。
-- Expo設定: bundle identifier `com.taiki0807.tsuminote`、URL scheme `tsumi-note`(`app.json`)。
+- Expo設定: bundle identifier `dev.hosokawalab.tsuminote`、URL scheme `tsumi-note`(`app.json`)。
 - ARCHITECTURE §15 は「認証実装前に Anonymous Data / Account-owned Data / ownerId / Logout後のLocal Data の扱いを正式決定する」と定めている → 本書の§2。
 
 ## 2. ローカルデータ所有モデル(決定: アカウント別SQLiteファイル)
