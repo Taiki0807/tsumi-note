@@ -17,6 +17,7 @@ import { Icon } from '@/components/icons';
 import { IconButton } from '@/components/form-ui';
 import { fontFamily, layout, radius, typography, useTheme } from '@/design';
 
+import { AppleLogo, GoogleLogo } from './brand-logos';
 import { checkPassword } from './validation';
 
 /**
@@ -309,7 +310,13 @@ export function ProviderButton({
         opacity: disabled ? 0.4 : 1,
       }}
     >
-      {busy ? <ActivityIndicator color={style.fg} /> : null}
+      {busy ? (
+        <ActivityIndicator color={style.fg} />
+      ) : provider === 'apple' ? (
+        <AppleLogo color={style.fg} />
+      ) : provider === 'google' ? (
+        <GoogleLogo />
+      ) : null}
       <Text style={{ fontFamily: fontFamily.extraBold, ...typography.button, color: style.fg }}>{label}</Text>
     </Pressable>
   );
