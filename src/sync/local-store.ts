@@ -117,6 +117,14 @@ export function clearOutbox(db: Executor, entity: string, entityId: string, upTo
   );
 }
 
+/** 指定の seq より後に、同じレコードの変更が登録されているか(送信後に追加された編集・削除) */
+export function hasNewerOutbox(db: Executor, entity: string, entityId: string, afterSeq: number): boolean {
+  const n = db.all<{ n: number }>(
+    sql`SELECT COUNT(*) AS n FROM sync_outbox WHERE entity = ${entity} AND entity_id = ${entityId} AND seq > ${afterSeq}`,
+  )[0]?.n;
+  return (n ?? 0) > 0;
+}
+
 export function readRecord(db: Executor, spec: EntitySpec, id: string): RecordData | undefined {
   const cols = spec.fields.map((f) => ident(f.name));
   const rows = db.all<RecordData>(

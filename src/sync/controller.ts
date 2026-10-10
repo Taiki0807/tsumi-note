@@ -1,4 +1,4 @@
-import { SyncStoppedError, type SyncSummary } from './engine';
+import { SyncStoppedError, SyncUpdateRequiredError, type SyncSummary } from './engine';
 import { SyncAuthError, SyncNetworkError } from './http-transport';
 
 export type SyncStatus =
@@ -9,12 +9,14 @@ export type SyncStatus =
   | 'offline'
   | 'error'
   /** 再ログインが必要。ローカルのデータは保持される */
-  | 'auth-error';
+  | 'auth-error'
+  /** アプリの更新が必要(未対応のデータ種別がある)。ローカルのデータは保持される */
+  | 'update-required';
 
 export type ControllerEvent =
   | { status: 'syncing' }
   | { status: 'idle'; summary: SyncSummary }
-  | { status: 'offline' | 'error' | 'auth-error' | 'disabled'; retryInMs: number | null };
+  | { status: 'offline' | 'error' | 'auth-error' | 'update-required' | 'disabled'; retryInMs: number | null };
 
 type Options = {
   run: () => Promise<SyncSummary>;
@@ -57,6 +59,11 @@ export function createSyncController(options: Options) {
       if (stopped || e instanceof SyncStoppedError) return;
       if (e instanceof SyncAuthError) {
         options.onChange({ status: 'auth-error', retryInMs: null });
+        return;
+      }
+      if (e instanceof SyncUpdateRequiredError) {
+        // 更新するまで解消しないので、タイマーによる再試行はしない
+        options.onChange({ status: 'update-required', retryInMs: null });
         return;
       }
       const retryInMs = backoff[Math.min(failures, backoff.length - 1)] ?? 300_000;

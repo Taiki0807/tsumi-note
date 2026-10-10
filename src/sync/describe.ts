@@ -28,6 +28,8 @@ export function describeSync({ status, lastSyncedAt, pending, conflicts }: Descr
       return `同期に失敗しました。自動で再試行します。${saved}${pending > 0 ? `（未同期 ${pending}件）` : ''}`;
     case 'auth-error':
       return `再ログインすると同期を再開できます。${saved}`;
+    case 'update-required':
+      return `アプリを更新すると、新しいデータの同期を続けられます。${saved}`;
     case 'idle':
       return pending > 0
         ? `未同期のデータが${pending}件あります。${last}`

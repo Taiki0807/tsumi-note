@@ -8,6 +8,7 @@ import {
   enableSync,
   getBaseSeq,
   getMeta,
+  hasNewerOutbox,
   keyOf,
   META,
   pendingKeys,
@@ -61,6 +62,17 @@ export type SyncSummary = {
 
 /** 同期を続けてはいけない状態(ログアウト・アカウント切替・別アカウントの応答) */
 export class SyncStoppedError extends Error {}
+
+/**
+ * サーバーから、このアプリが理解できない種別(entity)の変更が届いた。
+ * 取得済みとして扱うとカーソルが進み、アプリ更新後も再取得できなくなるため、ページ全体を反映せず止める。
+ * 自動では再試行しない(アプリを更新するまで解消しない)。ローカルのデータと未送信の変更は失われない。
+ */
+export class SyncUpdateRequiredError extends Error {
+  constructor(readonly entities: string[]) {
+    super('このアプリでは扱えない種類のデータがあります。アプリを更新してください');
+  }
+}
 
 export type RunSyncOptions = {
   db: AppDatabase;
@@ -149,8 +161,17 @@ async function pushAll(opts: RunSyncOptions, deviceId: string, summary: SyncSumm
         const g = sent.get(keyOf(r.entity, r.id));
         const spec = specOf(r.entity);
         if (!g || !spec || r.status === 'retry') continue;
-        if (r.status === 'superseded' && r.current) applyRemote(tx, spec, r.id, r.current);
-        if (r.serverSeq !== null) setBaseSeq(tx, r.entity, r.id, r.serverSeq);
+        // 送信後(応答待ちの間)に同じレコードが再編集・削除されているか。送信済みの変更(seq <= maxSeq)とは区別する。
+        // 確認から反映・outbox 更新までは、この同じトランザクション内で行う
+        const editedSince = hasNewerOutbox(tx, r.entity, r.id, g.maxSeq);
+        if (r.status === 'superseded' && r.current && !editedSince) {
+          applyRemote(tx, spec, r.id, r.current);
+        }
+        // 後続の編集がある場合は、サーバーの内容で上書きせず、ベース版も進めない。
+        // 次の送信が同時編集として扱われ、サーバー側の削除・他端末の編集との競合で内容が競合コピーに保全される
+        if (r.serverSeq !== null && !(r.status === 'superseded' && editedSince)) {
+          setBaseSeq(tx, r.entity, r.id, r.serverSeq);
+        }
         // 反映が確認できた分だけを outbox から外す(これ以降の編集は残る)
         clearOutbox(tx, r.entity, r.id, g.maxSeq);
         progressed++;
@@ -172,13 +193,17 @@ async function pullAll(opts: RunSyncOptions, summary: SyncSummary): Promise<void
     checkActive(opts);
     checkUser(opts, response.userId);
 
+    // 未対応の種別を飛ばしてカーソルを進めると、アプリ更新後も再取得できない。何も反映せずカーソルも進めない
+    const unknown = [...new Set(response.changes.filter((c) => !specOf(c.entity)).map((c) => c.entity))];
+    if (unknown.length > 0) throw new SyncUpdateRequiredError(unknown);
+
     // ページの反映とカーソルの更新は同じトランザクション。途中で中断してもカーソルは進まず、再取得で冪等に再反映される
     withoutCapture(db, opts.now(), (tx) => {
       // 未送信の編集があるレコードは上書きしない(次の送信で競合として解決され、内容は保全される)
       const pending = pendingKeys(tx);
       for (const rec of response.changes) {
         const spec = specOf(rec.entity);
-        if (!spec) continue; // 新しい種別(将来のアプリ)は無視し、カーソルだけ進める
+        if (!spec) throw new SyncUpdateRequiredError([rec.entity]); // 上で検出済み。ロールバックの保険
         if (pending.has(keyOf(rec.entity, rec.id))) continue;
         applyRemote(tx, spec, rec.id, rec.data);
         setBaseSeq(tx, rec.entity, rec.id, rec.serverSeq);

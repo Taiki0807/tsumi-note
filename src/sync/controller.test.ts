@@ -1,5 +1,5 @@
 import { createSyncController, type ControllerEvent } from './controller';
-import { SyncStoppedError, type SyncSummary } from './engine';
+import { SyncStoppedError, SyncUpdateRequiredError, type SyncSummary } from './engine';
 import { SyncAuthError, SyncNetworkError, SyncServerError } from './http-transport';
 
 const OK: SyncSummary = { pushed: 0, pulled: 0, conflicts: 0 };
@@ -73,6 +73,15 @@ describe('sync controller', () => {
     });
     await controller.trigger();
     expect(events.at(-1)).toEqual({ status: 'auth-error', retryInMs: null });
+    expect(timers).toHaveLength(0);
+  });
+
+  it('アプリ更新が必要な場合は専用の状態になり、タイマーで再試行しない', async () => {
+    const { controller, events, timers } = setup(async () => {
+      throw new SyncUpdateRequiredError(['future']);
+    });
+    await controller.trigger();
+    expect(events.at(-1)).toEqual({ status: 'update-required', retryInMs: null });
     expect(timers).toHaveLength(0);
   });
 
