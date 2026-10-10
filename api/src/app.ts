@@ -1,5 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { Auth } from './auth';
+import { deleteImage, getImage, putImage, type ObjectStore } from './images/service';
+import { ImageError, MAX_IMAGE_BYTES, readBodyWithLimit } from './images/validate';
 import { pullChanges, pushChanges, type SyncDriver } from './sync/service';
 import { MAX_PUSH_BODY_CHARS, parseCursor, parseLimit, parsePush, ValidationError } from './sync/validate';
 
@@ -46,7 +48,11 @@ type WaitUntil = (promise: Promise<unknown>) => void;
  * Hono アプリ。auth の生成方法(D1 / テスト用SQLite)は呼び出し側が決める。
  * ユーザーIDは必ず検証済みセッションから取得し、リクエスト本文・クエリのIDは信用しない。
  */
-export function createApp(getAuth: (waitUntil?: WaitUntil) => Auth, getSyncDriver?: () => SyncDriver) {
+export function createApp(
+  getAuth: (waitUntil?: WaitUntil) => Auth,
+  getSyncDriver?: () => SyncDriver,
+  getImageStore?: () => ObjectStore,
+) {
   const app = new Hono<{ Variables: AppVariables }>();
 
   const waitUntilOf = (c: Context): WaitUntil | undefined => {
@@ -112,6 +118,67 @@ export function createApp(getAuth: (waitUntil?: WaitUntil) => Auth, getSyncDrive
     } catch (e) {
       if (e instanceof ValidationError) return c.json({ error: 'invalid_request', message: e.message }, 400);
       throw e;
+    }
+  });
+
+  // ---- ノート画像(R2)。ユーザーは常にセッション由来。オブジェクトキーはサーバーが決める ----
+  const imageDeps = () => {
+    if (!getImageStore) throw new Error('images are not configured');
+    return { driver: syncDriver(), store: getImageStore() };
+  };
+  const imageError = (c: Context, e: unknown) => {
+    if (e instanceof ImageError) return c.json({ error: e.code }, e.status);
+    throw e;
+  };
+
+  app.put('/v1/images/:fileName', async (c) => {
+    const declared = Number(c.req.header('content-length') ?? 0);
+    if (declared > MAX_IMAGE_BYTES) return c.json({ error: 'payload_too_large' }, 413);
+    try {
+      const { driver, store } = imageDeps();
+      // Content-Length は信用せず、実際に受信したバイト数で上限を判定する(超過時は読み取りを中断)
+      const bytes = await readBodyWithLimit(c.req.raw.body, MAX_IMAGE_BYTES);
+      if (!bytes) return c.json({ error: 'payload_too_large' }, 413);
+      const result = await putImage(
+        driver,
+        store,
+        c.get('userId'),
+        {
+          fileName: c.req.param('fileName'),
+          bytes,
+          declaredSha256: c.req.header('x-content-sha256')?.toLowerCase(),
+          contentType: c.req.header('content-type'),
+        },
+        Date.now(),
+      );
+      return c.json(result);
+    } catch (e) {
+      return imageError(c, e);
+    }
+  });
+
+  app.get('/v1/images/:fileName', async (c) => {
+    const { driver, store } = imageDeps();
+    const image = await getImage(driver, store, c.get('userId'), c.req.param('fileName'));
+    // 他人の画像・存在しない画像・削除済みはすべて同じ 404(存在を推測させない)
+    if (!image) return c.json({ error: 'not_found' }, 404);
+    return new Response(image.bytes as unknown as BodyInit, {
+      headers: {
+        'content-type': image.contentType,
+        'x-content-sha256': image.sha256,
+        'cache-control': 'private, no-store',
+        'x-content-type-options': 'nosniff',
+      },
+    });
+  });
+
+  app.delete('/v1/images/:fileName', async (c) => {
+    try {
+      const { driver, store } = imageDeps();
+      const result = await deleteImage(driver, store, c.get('userId'), c.req.param('fileName'), Date.now());
+      return c.json({ result });
+    } catch (e) {
+      return imageError(c, e);
     }
   });
 

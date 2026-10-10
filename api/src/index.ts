@@ -4,6 +4,7 @@ import { createAuth } from './auth';
 import * as schema from './db/schema';
 import { createResendSender } from './email';
 import type { Bindings } from './env';
+import { createR2Store } from './images/r2-store';
 import { createD1Driver } from './sync/d1-driver';
 import { parseAppEnvironment } from './redirect-policy';
 
@@ -38,6 +39,7 @@ export default {
             .filter(Boolean),
         }),
       () => createD1Driver(env.DB),
+      () => createR2Store(env.IMAGES),
     );
     return app.fetch(request, env, ctx);
   },

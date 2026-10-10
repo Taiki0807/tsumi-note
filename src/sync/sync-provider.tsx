@@ -14,15 +14,18 @@ import {
 import { AppState } from 'react-native';
 
 import { useDatabaseContext } from '@/db/database-provider';
-import { databaseNameForOwner } from '@/db/ownership';
+import { databaseNameForOwner, imageDirectoryForOwner } from '@/db/ownership';
 import { authClient } from '@/features/auth/auth-client';
 import { useAuth } from '@/features/auth/auth-context';
 import { readAuthConfig } from '@/features/auth/config';
+import { createNoteImageBlobs, sha256Hex } from '@/features/notes/note-image-store';
 
 import { createSyncController, type SyncStatus } from './controller';
-import { runSync } from './engine';
+import { runSync, SyncStoppedError } from './engine';
 import { ENTITIES } from './entities';
-import { createHttpTransport } from './http-transport';
+import { createHttpImageTransport } from './http-image-transport';
+import { createHttpTransport, SyncAuthError } from './http-transport';
+import { liveNoteBodies, pullImages, pushImages, type ImageSyncOptions } from './image-sync';
 import { countPending, getMeta, META } from './local-store';
 
 export type SyncState = {
@@ -102,8 +105,46 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       net = null;
     };
 
+    // 画像: 端末のファイル → R2。D1の同期とは別に、ファイルごとの転送状態で管理する。
+    // DB・画像ディレクトリ・認証Cookieは同期開始時の所有者に固定する(アカウント切替で現在値を参照しない)
+    const aborter = new AbortController();
+    const pinnedCookie = Promise.resolve(client.getCookie());
+    const imageOptions: ImageSyncOptions = {
+      db,
+      files: createNoteImageBlobs(imageDirectoryForOwner(owner)),
+      transport: createHttpImageTransport({
+        baseUrl: apiUrl,
+        getCookie: () => pinnedCookie,
+        signal: aborter.signal,
+      }),
+      liveBodies: () => liveNoteBodies(db),
+      sha256: sha256Hex,
+      now: Date.now,
+      isActive: () => active,
+    };
+    /** 画像の失敗(通信・サーバー)でD1の同期を止めない。再ログインとアカウント切替だけは伝える */
+    const imagePhase = async (phase: typeof pushImages) => {
+      try {
+        await phase(imageOptions);
+      } catch (e) {
+        if (e instanceof SyncAuthError || e instanceof SyncStoppedError) throw e;
+      }
+    };
+
     const controller = createSyncController({
-      run: () => runSync({ db, transport, userId, now: Date.now, newId: randomUUID, isActive: () => active }),
+      run: async () => {
+        await imagePhase(pushImages); // ノートの参照より先に、画像の本体をR2へ
+        const summary = await runSync({
+          db,
+          transport,
+          userId,
+          now: Date.now,
+          newId: randomUUID,
+          isActive: () => active,
+        });
+        await imagePhase(pullImages); // 反映されたノートが参照する画像を取得
+        return summary;
+      },
       onChange: (event) => {
         if (!active) return;
         if (event.status === 'syncing') refresh({ status: 'syncing' });
@@ -137,13 +178,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false;
+      aborter.abort(); // 進行中の画像通信を中断。完了後の書き込みは isActive で防ぐ
       controller.stop();
       if (debounce) clearTimeout(debounce);
       stopAutoTriggers();
       dbListener.remove();
       triggerRef.current = () => {};
     };
-  }, [enabled, db, userId]);
+  }, [enabled, db, userId, owner]);
 
   const syncNow = useCallback(() => triggerRef.current(), []);
   // 同期しない間(ゲスト・セッション復元中)は無効状態を返す。前回の値は引き継がない

@@ -183,6 +183,20 @@ export const syncRecordMeta = sqliteTable(
   (t) => [primaryKey({ columns: [t.entity, t.entityId] })],
 );
 
+/**
+ * Transfer state of each note image file, kept apart from the D1 sync cursor (PHASE8_DESIGN §11).
+ * `state`: uploaded | upload_failed | download_pending | download_failed | rejected. A file without a row
+ * has never been transferred. Local bookkeeping only: never synced and never copied to another database.
+ */
+export const imageTransfers = sqliteTable('image_transfers', {
+  fileName: text('file_name').primaryKey(),
+  sha256: text('sha256'),
+  state: text('state').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 /** Sync bookkeeping (cursor, last synced time, owner, capture switch). Keys are prefixed `sync.`. */
 export const syncMetadata = sqliteTable('sync_metadata', {
   key: text('key').primaryKey(),

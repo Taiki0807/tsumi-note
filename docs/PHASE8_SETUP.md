@@ -52,6 +52,13 @@ PR 5 以降: R2 binding(`IMAGES`)。
 3. マイグレーション適用:
    - ローカル: `bun run db:migrate:local`
    - 本番: `bun run db:migrate:remote`(`--env production` を付けて本番DBを対象にする)
+3b. **R2(PR 5・ノート画像)**: バケットを環境ごとに作成する。**公開アクセス(r2.dev・カスタムドメイン)は有効にしない**(Worker経由でのみアクセスする)。
+   - 開発: `bunx wrangler r2 bucket create tsumi-note-images-development`
+   - 本番: `bunx wrangler r2 bucket create tsumi-note-images-production`
+   - `wrangler.toml` の `[[env.*.r2_buckets]]`(binding は `IMAGES`)は上記の名前で定義済み。名前を変えた場合は合わせて修正する。
+   - R2の資格情報(アクセスキー等)は不要。Workers の binding だけで読み書きする。追加のSecretsなし。
+   - D1の migration `0002_images.sql` を `db:migrate:local` / `db:migrate:remote` で適用する。
+   - R2の有効化にはCloudflareアカウントでR2の利用開始(支払い方法の登録)が必要な場合がある。**本番バケットの作成・変更は手動で行う**(このリポジトリのコードやCIは本番バケットを変更しない)。
 4. Secrets 登録:
    `bunx wrangler secret put BETTER_AUTH_SECRET`、`bunx wrangler secret put RESEND_API_KEY`
    (本番は `--env production`)。

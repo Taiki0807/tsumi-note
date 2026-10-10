@@ -1,6 +1,8 @@
 /** Workers の Bindings。秘密情報は wrangler secret で注入する(コミットしない)。 */
 export type Bindings = {
   DB: D1Database;
+  /** ノート画像の R2 バケット(非公開。公開URL・カスタムドメインを設定しない) */
+  IMAGES: R2Bucket;
   /** 秘密: 32文字以上のランダム文字列 */
   BETTER_AUTH_SECRET: string;
   /** APIの公開URL(メール内リンクの生成に使用) */

@@ -28,6 +28,10 @@ database_name = "tsumi-note-db"
 # `wrangler d1 create tsumi-note-db` の出力値に置き換える(未設定)
 database_id = "2aed7628-a4ed-405e-adb6-3b3660c95f4a"
 migrations_dir = "migrations"
+# ノート画像(非公開バケット)。`wrangler r2 bucket create tsumi-note-images-development` で作成する
+[[env.development.r2_buckets]]
+binding = "IMAGES"
+bucket_name = "tsumi-note-images-development"
 
 # ---- 本番環境 ----
 # 以下のダミー値(example.invalid / 0000…)が残っていると `bun run deploy` は事前チェックで失敗する。
@@ -47,3 +51,7 @@ binding = "DB"
 database_name = "tsumi-note-db-production"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+# `wrangler r2 bucket create tsumi-note-images-production`(公開アクセスは有効にしない)
+[[env.production.r2_buckets]]
+binding = "IMAGES"
+bucket_name = "tsumi-note-images-production"
