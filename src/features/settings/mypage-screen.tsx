@@ -7,6 +7,7 @@ import { AppIcon } from '@/components/app-icon';
 import { Icon, type IconName } from '@/components/icons';
 import { fontFamily, layout, lightColors, radius, typography, useTheme } from '@/design';
 import { useAuth } from '@/features/auth/auth-context';
+import { GuestAccountHint } from '@/features/account/guest-account-hint';
 import { SignedInCard } from '@/features/auth/signed-in-card';
 import { splitDuration } from '@/features/records/records-logic';
 import { TimerSettingsModal } from '@/features/timer/timer-settings-modal';
@@ -154,7 +155,7 @@ export function MyPageScreen() {
       >
         {summary ? (
           <>
-            {/* ログイン済みの表示は Figma 16 に基づき PR 6 で実装する。それまでは暫定カードでアカウントとログアウトを示す。 */}
+            {/* ログイン済みの表示。Figma 16 は取得できなかったため、既存トークンによる仮実装(Figma準拠は未確認)。 */}
             {auth.state.status === 'signedIn' ? <SignedInCard email={auth.state.user.email} /> : null}
             {/* Figma Sync prompt: primary card, 20pt radius, 18pt padding, white content. */}
             {auth.state.status !== 'signedIn' ? (
@@ -221,6 +222,9 @@ export function MyPageScreen() {
                 </Pressable>
               </View>
             ) : null}
+
+            {/* ゲスト利用中の説明とログイン導線。Figma 15 には無い追加(PR 6): 既存トークンのみ・未デザイン。 */}
+            {auth.state.status !== 'signedIn' ? <GuestAccountHint configured={auth.configured} /> : null}
 
             {/* Figma Goal link: 16pt padding, 44pt radius-12 tile with a 22pt target icon. */}
             <Pressable

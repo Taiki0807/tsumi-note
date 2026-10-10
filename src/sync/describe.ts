@@ -8,6 +8,36 @@ function formatTime(ms: number): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+export type SyncTone = 'ok' | 'busy' | 'warn' | 'error';
+
+/** マイページの状態バッジ(短いラベル)。同期済み / 同期中 / オフライン / 同期エラー / アプリの更新が必要 など */
+export function syncBadge({ status, pending }: Pick<Described, 'status' | 'pending'>): {
+  label: string;
+  tone: SyncTone;
+} {
+  switch (status) {
+    case 'disabled':
+      return { label: '確認中', tone: 'busy' };
+    case 'syncing':
+      return { label: '同期中', tone: 'busy' };
+    case 'offline':
+      return { label: 'オフライン', tone: 'warn' };
+    case 'error':
+      return { label: '同期エラー', tone: 'error' };
+    case 'auth-error':
+      return { label: '再ログインが必要', tone: 'error' };
+    case 'update-required':
+      return { label: 'アプリの更新が必要', tone: 'warn' };
+    case 'idle':
+      return pending > 0 ? { label: '未同期あり', tone: 'warn' } : { label: '同期済み', tone: 'ok' };
+  }
+}
+
+/** 手動同期を受け付けられるか。同期中・準備中・アプリ更新が必要な間は再実行しない */
+export function canSyncNow(status: SyncStatus): boolean {
+  return status !== 'syncing' && status !== 'disabled' && status !== 'update-required';
+}
+
 /**
  * 同期状態の説明文(暫定表示。マイページのデザインは PR 6)。
  * どの状態でも、データはこの端末に保存済みであることを伝える。

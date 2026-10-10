@@ -17,6 +17,7 @@ import migrations from '../../drizzle/migrations';
 import { closeDatabasesExcept, createRepositoryDeps, openDatabase } from './client';
 import { databaseNameForOwner, type OwnerId } from './ownership';
 import { ownerHintStorage } from './owner-hint-storage';
+import { runPendingLocalPurge } from './local-purge-native';
 import { createRepositories, type Repositories } from './repositories';
 import { resolveOwner, syncOwnerHint, type OwnerAuthState } from './resolve-owner';
 import type { AppDatabase } from './types';
@@ -95,6 +96,8 @@ function OwnerDatabase({
   // Close the previous owner's connection once this one is the active one.
   useEffect(() => {
     closeDatabasesExcept(databaseName);
+    // After an account deletion completed on the server, remove that account's now-closed local files.
+    void runPendingLocalPurge(databaseName);
   }, [databaseName]);
 
   if (error) return <>{renderError?.(error) ?? null}</>;

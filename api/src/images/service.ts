@@ -14,6 +14,8 @@ export interface ObjectStore {
   get(key: string): Promise<Uint8Array | null>;
   head(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
+  /** prefix で始まるすべてのオブジェクトを削除する(アカウント削除用)。何度呼んでもよい */
+  deletePrefix(prefix: string): Promise<void>;
 }
 
 /** アップロード直後の画像は、参照するノートの同期が追いつくまで削除を受け付けない */

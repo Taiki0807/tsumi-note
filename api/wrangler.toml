@@ -13,6 +13,8 @@ compatibility_flags = ["nodejs_compat"]
 # ---- 開発環境(ローカル専用。デプロイ用途ではない) ----
 [env.development]
 name = "tsumi-note-api-development"
+[env.development.triggers]
+crons = ["17 3 * * *"] # 削除済みアカウントのR2残骸の掃除
 [env.development.vars]
 APP_ENV = "development"
 BETTER_AUTH_URL = "http://localhost:8787"
@@ -37,6 +39,8 @@ bucket_name = "tsumi-note-images-development"
 # 以下のダミー値(example.invalid / 0000…)が残っていると `bun run deploy` は事前チェックで失敗する。
 [env.production]
 name = "tsumi-note-api-production"
+[env.production.triggers]
+crons = ["17 3 * * *"] # 削除済みアカウントのR2残骸の掃除
 [env.production.vars]
 APP_ENV = "production"
 BETTER_AUTH_URL = "https://api.example.invalid"

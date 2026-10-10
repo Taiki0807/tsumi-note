@@ -42,10 +42,12 @@ export function createHarness(
     },
   });
   const objects = new Map<string, Uint8Array>();
+  /** R2 の障害を再現する(アカウント削除の途中失敗のテスト用) */
+  const faults = { deletePrefix: false };
   const app = createApp(
     () => auth,
     () => bunDriver(sqlite),
-    () => memoryStore(objects),
+    () => faultyStore(memoryStore(objects), faults),
   );
 
   let ipCounter = 0;
@@ -87,7 +89,17 @@ export function createHarness(
     } as RequestInit);
   }
 
-  return { sqlite, sent, request, raw, objects, lastLink };
+  return { sqlite, sent, request, raw, objects, lastLink, faults };
+}
+
+function faultyStore(inner: ObjectStore, faults: { deletePrefix: boolean }): ObjectStore {
+  return {
+    ...inner,
+    async deletePrefix(prefix) {
+      if (faults.deletePrefix) throw new Error('R2 unavailable');
+      await inner.deletePrefix(prefix);
+    },
+  };
 }
 
 /** テスト用のR2代替(メモリ)。キーは本番と同じくサーバーが決めたものがそのまま入る */
@@ -104,6 +116,9 @@ export function memoryStore(objects: Map<string, Uint8Array>): ObjectStore {
     },
     async delete(key) {
       objects.delete(key);
+    },
+    async deletePrefix(prefix) {
+      for (const key of [...objects.keys()]) if (key.startsWith(prefix)) objects.delete(key);
     },
   };
 }

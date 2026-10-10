@@ -38,6 +38,9 @@ export function createTestServer(users: string[]) {
     async delete(key) {
       objects.delete(key);
     },
+    async deletePrefix(prefix) {
+      for (const key of [...objects.keys()]) if (key.startsWith(prefix)) objects.delete(key);
+    },
   };
   /** サーバーの時計(画像削除の猶予時間の判定に使う) */
   const clock = { now: 1_000_000 };

@@ -1,0 +1,119 @@
+import type { ObjectStore } from '../images/service';
+import type { SyncDriver } from '../sync/service';
+
+/** ソーシャルのみのアカウントが削除できる、ログインからの最大経過時間(再認証の代わり) */
+export const FRESH_SESSION_MS = 5 * 60 * 1000;
+/** パスワード照合の試行制限(ユーザー単位) */
+export const DELETE_ATTEMPT_WINDOW_MS = 60 * 1000;
+export const DELETE_ATTEMPT_MAX = 5;
+
+export function r2PrefixFor(userId: string): string {
+  return `u/${userId}/`;
+}
+
+export async function isDeletionRequested(driver: SyncDriver, userId: string): Promise<boolean> {
+  const rows = await driver.all<{ user_id: string }>({
+    sql: 'SELECT user_id FROM account_deletions WHERE user_id = ?',
+    params: [userId],
+  });
+  return rows.length > 0;
+}
+
+export async function listProviders(driver: SyncDriver, userId: string): Promise<string[]> {
+  const rows = await driver.all<{ provider_id: string }>({
+    sql: 'SELECT provider_id FROM account WHERE user_id = ? ORDER BY provider_id',
+    params: [userId],
+  });
+  return rows.map((r) => r.provider_id);
+}
+
+export async function getPasswordHash(driver: SyncDriver, userId: string): Promise<string | null> {
+  const rows = await driver.all<{ password: string | null }>({
+    sql: "SELECT password FROM account WHERE user_id = ? AND provider_id = 'credential'",
+    params: [userId],
+  });
+  return rows[0]?.password ?? null;
+}
+
+/** 試行を1回記録し、上限を超えていれば false。既存の rate_limit テーブル(Better Auth と同形式)を使う */
+export async function consumeDeleteAttempt(driver: SyncDriver, userId: string, now: number): Promise<boolean> {
+  const key = `delete-account:${userId}`;
+  const rows = await driver.all<{ count: number; last_request: number }>({
+    sql: 'SELECT count, last_request FROM rate_limit WHERE key = ?',
+    params: [key],
+  });
+  const row = rows[0];
+  if (!row || now - row.last_request > DELETE_ATTEMPT_WINDOW_MS) {
+    await driver.batch([
+      {
+        sql: 'INSERT INTO rate_limit (id, key, count, last_request) VALUES (?, ?, 1, ?) ON CONFLICT(key) DO UPDATE SET count = 1, last_request = excluded.last_request',
+        params: [key, key, now],
+      },
+    ]);
+    return true;
+  }
+  if (row.count >= DELETE_ATTEMPT_MAX) return false;
+  await driver.batch([{ sql: 'UPDATE rate_limit SET count = count + 1 WHERE key = ?', params: [key] }]);
+  return true;
+}
+
+/**
+ * アカウントを削除する。何度呼んでも同じ結果になり(冪等)、途中で失敗したら同じ要求を再送すれば続きから完了する。
+ *
+ * 1. 削除の依頼を記録(以降、このユーザーは /v1/* を使えない=他端末からの再同期を遮断)
+ * 2. R2 の `u/<userId>/` 配下を削除
+ * 3. D1 の user 行を削除(session / account / sync_* / image_objects は ON DELETE CASCADE)
+ * 4. 並行アップロードの取りこぼしを R2 から再度掃除し、完了を記録
+ *
+ * R2 の削除に失敗した場合は user 行を消さない(=セッションが残り、利用者が再試行できる)。
+ * 完了を返すのは 3 まで成功した後。4 の失敗は completed_at が NULL のまま残り、sweepDeletions が再実行する。
+ * 削除対象はすべて userId で絞る(他アカウントには触れない)。
+ */
+export async function deleteAccount(
+  driver: SyncDriver,
+  store: ObjectStore,
+  userId: string,
+  now: number,
+): Promise<void> {
+  await driver.batch([
+    {
+      sql: 'INSERT OR IGNORE INTO account_deletions (user_id, requested_at) VALUES (?, ?)',
+      params: [userId, now],
+    },
+  ]);
+  await store.deletePrefix(r2PrefixFor(userId));
+  await driver.batch([
+    // 再設定トークンの検証レコード(value にユーザーIDが入る)も消す
+    { sql: 'DELETE FROM verification WHERE value = ?', params: [userId] },
+    { sql: 'DELETE FROM rate_limit WHERE key = ?', params: [`delete-account:${userId}`] },
+    { sql: 'DELETE FROM user WHERE id = ?', params: [userId] },
+  ]);
+  try {
+    await store.deletePrefix(r2PrefixFor(userId));
+    await driver.batch([
+      { sql: 'UPDATE account_deletions SET completed_at = ? WHERE user_id = ?', params: [now, userId] },
+    ]);
+  } catch (e) {
+    // user 行は削除済み。残骸の掃除は sweepDeletions が再実行する(ユーザーIDはログに出さない)
+    console.error('[account] R2 の最終掃除に失敗しました', e instanceof Error ? e.message : 'unknown');
+  }
+}
+
+/** user 行は消えたが R2 の掃除が済んでいない削除を完了させる(定期実行)。完了した件数を返す */
+export async function sweepDeletions(driver: SyncDriver, store: ObjectStore, now: number): Promise<number> {
+  const rows = await driver.all<{ user_id: string }>({
+    sql: `SELECT d.user_id FROM account_deletions d
+          WHERE d.completed_at IS NULL AND NOT EXISTS (SELECT 1 FROM user u WHERE u.id = d.user_id)
+          LIMIT 50`,
+    params: [],
+  });
+  let done = 0;
+  for (const { user_id } of rows) {
+    await store.deletePrefix(r2PrefixFor(user_id));
+    await driver.batch([
+      { sql: 'UPDATE account_deletions SET completed_at = ? WHERE user_id = ?', params: [now, user_id] },
+    ]);
+    done++;
+  }
+  return done;
+}
