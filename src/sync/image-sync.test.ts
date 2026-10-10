@@ -333,3 +333,100 @@ describe('HTTPトランスポート', () => {
     await expect(t.download('a.png')).rejects.toBeInstanceOf(SyncAuthError);
   });
 });
+
+describe('アカウント切替時の画像同期', () => {
+  /** 応答を手動で解放できる遅延トランスポート */
+  function slowTransport(inner: ImageTransport) {
+    const gates: (() => void)[] = [];
+    const wait = () => new Promise<void>((r) => gates.push(r));
+    const transport: ImageTransport = {
+      upload: async (...args) => {
+        await wait();
+        return inner.upload(...args);
+      },
+      download: async (name) => {
+        await wait();
+        return inner.download(name);
+      },
+      remove: (name) => inner.remove(name),
+    };
+    return { transport, release: () => gates.splice(0).forEach((g) => g()) };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('Aの同期中に所有者が変わると、遅延した応答が返ってもAの転送状態を書かず、Bの領域へ混ざらない', async () => {
+    const server = createTestServer(['u1', 'u2']);
+    const a = createDevice('a', 'u1');
+    a.files.set('p1.png', PNG(1));
+    a.repos.notes.create({ title: 'n', body: ref('p1.png') });
+    const slow = slowTransport(server.connectImages('u1').transport);
+    const running = pushImages(a.imageOptions(slow.transport));
+    await tick();
+    a.stop(); // ログアウト/アカウント切替
+    slow.release();
+    await expect(running).rejects.toBeInstanceOf(SyncStoppedError);
+    expect(readTransfers(a.db).size).toBe(0);
+
+    // Bの同期は正常に開始でき、Aの画像はBの領域にない
+    const b = createDevice('b', 'u2');
+    b.repos.notes.create({ title: 'n', body: ref('p1.png') });
+    const summary = await pullImages(b.imageOptions(server.connectImages('u2').transport));
+    expect(summary.downloaded).toBe(0);
+    expect(b.files.size).toBe(0);
+  });
+
+  it('ダウンロード待ちの途中で所有者が変わると、画像を保存しない', async () => {
+    const server = createTestServer(['u1']);
+    const a = createDevice('a', 'u1');
+    a.files.set('p1.png', PNG(1));
+    a.repos.notes.create({ title: 'n', body: ref('p1.png') });
+    await pushImages(a.imageOptions(server.connectImages('u1').transport));
+
+    const other = createDevice('o', 'u1');
+    other.repos.notes.create({ title: 'n', body: ref('p1.png') });
+    const slow = slowTransport(server.connectImages('u1').transport);
+    const running = pullImages(other.imageOptions(slow.transport));
+    await tick();
+    other.stop();
+    slow.release();
+    await expect(running).rejects.toBeInstanceOf(SyncStoppedError);
+    expect(other.files.size).toBe(0);
+    expect(readTransfers(other.db).size).toBe(0);
+  });
+
+  it('同じアカウントで再ログインすると、新しい同期インスタンスで正常に転送できる', async () => {
+    const server = createTestServer(['u1']);
+    const first = createDevice('a', 'u1');
+    first.files.set('p1.png', PNG(1));
+    first.repos.notes.create({ title: 'n', body: ref('p1.png') });
+    first.stop();
+    await expect(pushImages(first.imageOptions(server.connectImages('u1').transport))).rejects.toBeInstanceOf(
+      SyncStoppedError,
+    );
+    const second = createDevice('a2', 'u1');
+    second.files.set('p1.png', PNG(1));
+    second.repos.notes.create({ title: 'n', body: ref('p1.png') });
+    expect((await pushImages(second.imageOptions(server.connectImages('u1').transport))).uploaded).toBe(1);
+  });
+
+  it('AbortSignal で進行中の通信が中断され、中断後は通信しない。固定したCookieで送る', async () => {
+    const aborter = new AbortController();
+    const cookies: string[] = [];
+    const t = createHttpImageTransport({
+      baseUrl: 'http://x',
+      getCookie: () => 'cookie-A',
+      signal: aborter.signal,
+      fetchImpl: ((_url: string, init: RequestInit) =>
+        new Promise((_, reject) => {
+          cookies.push((init.headers as Record<string, string>).cookie!);
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })) as unknown as typeof fetch,
+    });
+    const pending = t.download('a.png');
+    await tick();
+    aborter.abort();
+    await expect(pending).rejects.toBeInstanceOf(SyncNetworkError);
+    await expect(t.download('b.png')).rejects.toBeInstanceOf(SyncNetworkError);
+    expect(cookies).toEqual(['cookie-A']);
+  });
+});

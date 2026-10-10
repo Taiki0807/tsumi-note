@@ -20,6 +20,8 @@ type Options = {
   getCookie: () => Promise<string> | string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** 中断されると進行中の通信を止める(アカウント切替・ログアウト) */
+  signal?: AbortSignal;
 };
 
 /** Better Auth のセッションCookieで認証する同期APIクライアント。本文・URLにユーザーIDは載せない */
@@ -55,14 +57,24 @@ export function createHttpTransport({
  * セッションCookie付きでAPIを呼ぶ共通処理(同期・画像で共用)。通信失敗は SyncNetworkError、
  * 401/403 は SyncAuthError。それ以外のステータスは呼び出し側が判断する。
  */
-export function createAuthedRequest({ baseUrl, getCookie, fetchImpl = fetch, timeoutMs = 30_000 }: Options) {
+export function createAuthedRequest({
+  baseUrl,
+  getCookie,
+  fetchImpl = fetch,
+  timeoutMs = 30_000,
+  signal,
+}: Options) {
   return async function send(
     path: string,
     init: { method: string; headers?: Record<string, string>; body?: string | Uint8Array },
   ): Promise<Response> {
+    if (signal?.aborted) throw new SyncNetworkError('同期は中断されました');
     const cookie = await getCookie();
     if (!cookie) throw new SyncAuthError('ログインが必要です');
+    if (signal?.aborted) throw new SyncNetworkError('同期は中断されました');
     const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener('abort', onAbort);
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res: Response;
     try {
@@ -78,6 +90,7 @@ export function createAuthedRequest({ baseUrl, getCookie, fetchImpl = fetch, tim
       throw new SyncNetworkError('サーバーに接続できません');
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
     }
     if (res.status === 401 || res.status === 403) throw new SyncAuthError('再ログインが必要です');
     return res;

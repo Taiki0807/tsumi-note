@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { readBodyWithLimit } from '../src/images/validate';
 import { createHarness, registerAndLogin } from './harness';
 
 type H = ReturnType<typeof createHarness>;
@@ -217,5 +218,62 @@ describe('画像API: 削除', () => {
     expect((await get(h, a, 'img2.png')).status).toBe(200);
     await del(h, a, 'img2.png');
     expect(h.objects.size).toBe(0);
+  });
+});
+
+describe('画像API: 本文のストリーム読み取り', () => {
+  const LIMIT = 15 * 1024 * 1024;
+  const chunked = (sizes: number[]) => {
+    let i = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (i >= sizes.length) return controller.close();
+        controller.enqueue(new Uint8Array(sizes[i++]!).fill(1));
+      },
+    });
+  };
+
+  test('上限以下の本文は全量を返す(Content-Length 不要)', async () => {
+    const out = await readBodyWithLimit(chunked([1000, 2000, 3000]), LIMIT);
+    expect(out?.length).toBe(6000);
+  });
+
+  test('ちょうど上限は許可し、1バイト超過は null', async () => {
+    expect((await readBodyWithLimit(chunked([LIMIT]), LIMIT))?.length).toBe(LIMIT);
+    expect(await readBodyWithLimit(chunked([LIMIT, 1]), LIMIT)).toBeNull();
+  });
+
+  test('超過した時点で読み取りを中断し、残りを読まずストリームをキャンセルする', async () => {
+    let cancelled = false;
+    let produced = 0;
+    const endless = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          produced++;
+          controller.enqueue(new Uint8Array(1024 * 1024));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    expect(await readBodyWithLimit(endless, LIMIT)).toBeNull();
+    expect(cancelled).toBe(true);
+    expect(produced).toBeLessThanOrEqual(17); // 終わらない本文でも上限直後に止まる
+  });
+
+  test('本文なしは空', async () => {
+    expect((await readBodyWithLimit(null, LIMIT))?.length).toBe(0);
+  });
+
+  test('15MiB 超は Content-Length が実サイズより小さくても 413(正常な画像は 200)', async () => {
+    const { h, a } = await setup();
+    expect((await put(h, a, 'ok.png', png())).status).toBe(200);
+    const big = new Uint8Array(LIMIT + 1);
+    big.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const res = await put(h, a, 'big.png', big, { 'content-length': '100' });
+    expect(res.status).toBe(413);
+    expect(h.objects.size).toBe(1);
   });
 });

@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { Auth } from './auth';
 import { deleteImage, getImage, putImage, type ObjectStore } from './images/service';
-import { ImageError, MAX_IMAGE_BYTES } from './images/validate';
+import { ImageError, MAX_IMAGE_BYTES, readBodyWithLimit } from './images/validate';
 import { pullChanges, pushChanges, type SyncDriver } from './sync/service';
 import { MAX_PUSH_BODY_CHARS, parseCursor, parseLimit, parsePush, ValidationError } from './sync/validate';
 
@@ -136,7 +136,9 @@ export function createApp(
     if (declared > MAX_IMAGE_BYTES) return c.json({ error: 'payload_too_large' }, 413);
     try {
       const { driver, store } = imageDeps();
-      const bytes = new Uint8Array(await c.req.arrayBuffer());
+      // Content-Length は信用せず、実際に受信したバイト数で上限を判定する(超過時は読み取りを中断)
+      const bytes = await readBodyWithLimit(c.req.raw.body, MAX_IMAGE_BYTES);
+      if (!bytes) return c.json({ error: 'payload_too_large' }, 413);
       const result = await putImage(
         driver,
         store,

@@ -91,20 +91,31 @@ export const noteImageFiles: ImageFiles = {
  * `<name>.partial` and moved into place, so a crash never leaves a truncated file under a real name
  * (`.partial` files are ignored by `noteImageFiles.list`). An existing file is never overwritten.
  */
-export const noteImageBlobs: ImageBlobStore = {
-  list: () => noteImageFiles.list(),
-  read: (fileName) => new File(imageDirectory(), fileName).bytes(),
-  writeNew: async (fileName, bytes) => {
-    const dir = imageDirectory();
-    const target = new File(dir, fileName);
-    if (target.exists) return;
-    const partial = new File(dir, `${fileName}.partial`);
-    if (partial.exists) partial.delete();
-    partial.create();
-    partial.write(bytes);
-    partial.move(target);
-  },
-};
+export function createNoteImageBlobs(directoryName?: string): ImageBlobStore {
+  const dir = () => imageDirectory(directoryName);
+  return {
+    list: () =>
+      dir()
+        .list()
+        .filter((entry): entry is File => entry instanceof File)
+        .map((file) => file.name)
+        .filter((name) => !name.endsWith('.partial')),
+    read: (fileName) => new File(dir(), fileName).bytes(),
+    writeNew: async (fileName, bytes) => {
+      const d = dir();
+      const target = new File(d, fileName);
+      if (target.exists) return;
+      const partial = new File(d, `${fileName}.partial`);
+      if (partial.exists) partial.delete();
+      partial.create();
+      partial.write(bytes);
+      partial.move(target);
+    },
+  };
+}
+
+/** Follows the active owner ({@link setImageOwner}). Cloud sync must use a store pinned to its owner instead. */
+export const noteImageBlobs: ImageBlobStore = createNoteImageBlobs();
 
 /** Displayable `file://` URI for a stored image, or `undefined` when the file is missing. */
 export function noteImageUri(fileName: string): string | undefined {

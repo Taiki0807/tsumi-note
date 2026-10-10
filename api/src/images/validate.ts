@@ -2,6 +2,41 @@
 
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
+/**
+ * 本文をストリームで読み、`limit` バイトを超えた時点で読み取りを中断して null を返す。
+ * 超過分を含めて全量をメモリに載せない。Reader は必ずキャンセル/解放する。
+ */
+export async function readBodyWithLimit(
+  body: ReadableStream<Uint8Array> | null,
+  limit: number,
+): Promise<Uint8Array | null> {
+  if (!body) return new Uint8Array(0);
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
 /** アプリの `note-images.ts` と同じ名前規則(ランダムID + 拡張子) */
 export const IMAGE_FILE_NAME = /^[A-Za-z0-9_-]{1,100}\.(jpg|jpeg|png|gif|webp|heic|heif)$/i;
 

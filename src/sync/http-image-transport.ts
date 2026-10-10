@@ -6,6 +6,7 @@ type Options = {
   getCookie: () => Promise<string> | string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  signal?: AbortSignal;
 };
 
 /**
@@ -17,8 +18,9 @@ export function createHttpImageTransport({
   getCookie,
   fetchImpl,
   timeoutMs = 60_000,
+  signal,
 }: Options): ImageTransport {
-  const send = createAuthedRequest({ baseUrl, getCookie, fetchImpl, timeoutMs });
+  const send = createAuthedRequest({ baseUrl, getCookie, fetchImpl, timeoutMs, signal });
   const path = (fileName: string) => `/v1/images/${encodeURIComponent(fileName)}`;
 
   return {

@@ -152,7 +152,9 @@ export async function pushImages(opts: ImageSyncOptions): Promise<ImageSyncSumma
     try {
       const bytes = await opts.files.read(name);
       const sha256 = await opts.sha256(bytes);
+      checkActive(opts); // 読み込み中に所有者が変わった場合は送らない
       await opts.transport.upload(name, bytes, sha256, mimeTypeOf(name));
+      checkActive(opts); // 別アカウントのDBへ転送状態を書かない
       // サーバーが R2 保存の成功を応答した後にだけ「同期済み」にする
       writeTransfer(opts.db, name, 'uploaded', opts.now(), { sha256 });
       summary.uploaded++;
@@ -180,6 +182,7 @@ export async function pushImages(opts: ImageSyncOptions): Promise<ImageSyncSumma
     checkActive(opts);
     try {
       const result = await opts.transport.remove(name);
+      checkActive(opts);
       if (result !== 'in_use') {
         clearTransfer(opts.db, name);
         summary.removed++;
@@ -206,6 +209,7 @@ export async function pullImages(opts: ImageSyncOptions): Promise<ImageSyncSumma
     const attempts = (transfers.get(name)?.attempts ?? 0) + 1;
     try {
       const found = await opts.transport.download(name);
+      checkActive(opts); // 別アカウントの画像ディレクトリ・DBへ書かない
       if (!found) {
         writeTransfer(opts.db, name, 'download_pending', opts.now(), { attempts });
         summary.waiting++;
@@ -214,6 +218,7 @@ export async function pullImages(opts: ImageSyncOptions): Promise<ImageSyncSumma
       // 壊れた本体を保存して「取得済み」にしない
       if ((await opts.sha256(found.bytes)) !== found.sha256)
         throw new Error('取得した画像の整合性を確認できません');
+      checkActive(opts);
       await opts.files.writeNew(name, found.bytes);
       writeTransfer(opts.db, name, 'uploaded', opts.now(), { sha256: found.sha256 });
       summary.downloaded++;
