@@ -89,13 +89,29 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     const refresh = (patch: Partial<Omit<SyncState, 'syncNow'>>) =>
       active && setValue((v) => ({ ...v, lastSyncedAt: readLast(), pending: countPending(db), ...patch }));
 
+    // 自動同期の経路(定期・フォアグラウンド復帰・ネットワーク復帰)。更新が必要になったら全て外す
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let appState: { remove: () => void } | null = null;
+    let net: { remove: () => void } | null = null;
+    const stopAutoTriggers = () => {
+      if (interval) clearInterval(interval);
+      interval = null;
+      appState?.remove();
+      appState = null;
+      net?.remove();
+      net = null;
+    };
+
     const controller = createSyncController({
       run: () => runSync({ db, transport, userId, now: Date.now, newId: randomUUID, isActive: () => active }),
       onChange: (event) => {
         if (!active) return;
         if (event.status === 'syncing') refresh({ status: 'syncing' });
         else if (event.status === 'idle') refresh({ status: 'idle', conflicts: event.summary.conflicts });
-        else refresh({ status: event.status });
+        else {
+          if (event.status === 'update-required') stopAutoTriggers();
+          refresh({ status: event.status });
+        }
       },
     });
     const trigger = () => void controller.trigger();
@@ -113,20 +129,18 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         else refresh({});
       }, DEBOUNCE_MS);
     });
-    const appState = AppState.addEventListener('change', (s) => s === 'active' && trigger());
-    const net = Network.addNetworkStateListener((s) => {
+    appState = AppState.addEventListener('change', (s) => s === 'active' && trigger());
+    net = Network.addNetworkStateListener((s) => {
       if (s.isConnected && s.isInternetReachable !== false) trigger();
     });
-    const interval = setInterval(trigger, PERIODIC_MS);
+    interval = setInterval(trigger, PERIODIC_MS);
 
     return () => {
       active = false;
       controller.stop();
       if (debounce) clearTimeout(debounce);
-      clearInterval(interval);
+      stopAutoTriggers();
       dbListener.remove();
-      appState.remove();
-      net.remove();
       triggerRef.current = () => {};
     };
   }, [enabled, db, userId]);

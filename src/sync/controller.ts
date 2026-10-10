@@ -39,6 +39,8 @@ export function createSyncController(options: Options) {
   const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = options.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
   let stopped = false;
+  /** アプリ更新が必要な間は true。この controller(=この実行環境)の間は解消しない */
+  let updateRequired = false;
   let running: Promise<void> | null = null;
   let rerun = false;
   let failures = 0;
@@ -62,7 +64,10 @@ export function createSyncController(options: Options) {
         return;
       }
       if (e instanceof SyncUpdateRequiredError) {
-        // 更新するまで解消しないので、タイマーによる再試行はしない
+        // 更新するまで解消しないので、以降の trigger()(定期・復帰・ネットワーク・手動)も受け付けない。
+        // アプリ更新後は新しい実行環境で controller が作り直され、保存済みカーソルから再開する
+        updateRequired = true;
+        cancelTimer();
         options.onChange({ status: 'update-required', retryInMs: null });
         return;
       }
@@ -77,7 +82,7 @@ export function createSyncController(options: Options) {
   }
 
   function trigger(): Promise<void> {
-    if (stopped) return Promise.resolve();
+    if (stopped || updateRequired) return Promise.resolve();
     if (running) {
       rerun = true;
       return running;
@@ -88,7 +93,7 @@ export function createSyncController(options: Options) {
         do {
           rerun = false;
           await execute();
-        } while (rerun && !stopped);
+        } while (rerun && !stopped && !updateRequired);
       } finally {
         running = null;
       }
@@ -102,6 +107,10 @@ export function createSyncController(options: Options) {
     stop() {
       stopped = true;
       cancelTimer();
+    },
+    /** アプリ更新が必要で、自動同期を止めている */
+    get isUpdateRequired() {
+      return updateRequired;
     },
     get isRunning() {
       return running !== null;

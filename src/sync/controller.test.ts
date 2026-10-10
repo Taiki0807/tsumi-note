@@ -85,6 +85,60 @@ describe('sync controller', () => {
     expect(timers).toHaveLength(0);
   });
 
+  describe('update-required 中の自動同期', () => {
+    const updateRequired = () => {
+      const run = jest.fn(async (): Promise<SyncSummary> => {
+        throw new SyncUpdateRequiredError(['future']);
+      });
+      return { run, ...setup(run) };
+    };
+
+    it('定期・復帰・ネットワーク復帰・手動のどの trigger() でも通信しない', async () => {
+      const { controller, run, events } = updateRequired();
+      await controller.trigger();
+      expect(run).toHaveBeenCalledTimes(1);
+      for (let i = 0; i < 5; i++) await controller.trigger();
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(controller.isUpdateRequired).toBe(true);
+      expect(events.at(-1)).toEqual({ status: 'update-required', retryInMs: null });
+    });
+
+    it('実行中に再実行が予約されていても、更新要求後は再実行しない', async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const run = jest.fn(async (): Promise<SyncSummary> => {
+        await gate;
+        throw new SyncUpdateRequiredError(['future']);
+      });
+      const { controller } = setup(run);
+      const first = controller.trigger();
+      void controller.trigger();
+      release();
+      await first;
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it('通常状態では trigger() のたびに同期する', async () => {
+      const run = jest.fn(async () => OK);
+      const { controller } = setup(run);
+      await controller.trigger();
+      await controller.trigger();
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(controller.isUpdateRequired).toBe(false);
+    });
+
+    it('アプリ更新後・別アカウント(新しい controller)では状態を引き継がず同期できる', async () => {
+      const old = updateRequired();
+      await old.controller.trigger();
+      const run = jest.fn(async () => OK);
+      const fresh = setup(run);
+      await fresh.controller.trigger();
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(fresh.controller.isUpdateRequired).toBe(false);
+      expect(fresh.events.at(-1)?.status).toBe('idle');
+    });
+  });
+
   it('停止後は実行も再試行もしない', async () => {
     const run = jest.fn(async () => {
       throw new SyncNetworkError('x');
