@@ -1,12 +1,14 @@
-import { copyImageFiles, copyImageFilesExclusive, ImageRestoreError, type ImageCopyOps } from './copy-images';
+import { copyImageFiles, copyImageFilesExclusive, type ImageCopyOps } from './copy-images';
 
-type Fault = 'copy' | 'truncate' | 'backup' | 'promote' | 'restore';
+type Fault = 'copy' | 'copyInterrupted' | 'truncate' | 'promote' | 'promoteInterrupted' | 'corruptPromote';
 
 /**
- * In-memory destination directory (full name → size) with rename semantics like expo's `move()` without
- * `overwrite`: moving onto an existing file fails. The source is read-only and checked for changes.
+ * In-memory destination directory (full name → content). The content string stands in for the content
+ * hash; a prefix of it models a half-written file. `promotePartial` has rename semantics like expo's
+ * `move()` without `overwrite` (fails when the target exists); `promoteInterrupted` models Android's
+ * copy-then-delete fallback being killed half-way (truncated final file, partial still there).
  */
-function createFakeFiles(source: Record<string, number>, destination: Record<string, number> = {}) {
+function createFakeFiles(source: Record<string, string>, destination: Record<string, string> = {}) {
   const dest = new Map(Object.entries(destination));
   const faults = new Map<Fault, Set<string> | 'all'>();
   const fail = (fault: Fault, ...names: string[]) => faults.set(fault, new Set(names));
@@ -16,188 +18,205 @@ function createFakeFiles(source: Record<string, number>, destination: Record<str
     const f = faults.get(fault);
     return f === 'all' || f?.has(name) === true;
   };
-  const rename = async (from: string, to: string) => {
-    await Promise.resolve();
-    if (!dest.has(from)) throw new Error('missing');
-    if (dest.has(to)) throw new Error('exists');
-    dest.set(to, dest.get(from) as number);
-    dest.delete(from);
-  };
   const ops: ImageCopyOps = {
     listSource: () => Object.keys(source),
-    sourceSize: (n) => source[n] ?? -1,
-    destinationSize: (n) => dest.get(n),
-    partialSize: (n) => dest.get(`${n}.partial`),
-    backupSize: (n) => dest.get(`${n}.backup`),
+    sourceHash: async (n) => source[n] ?? '',
+    destinationHash: async (n) => dest.get(n),
+    partialHash: async (n) => dest.get(`${n}.partial`),
+    destinationIsPrefixOfPartial: async (n) =>
+      (dest.get(`${n}.partial`) ?? '').startsWith(dest.get(n) ?? '\u0000'),
     copyToPartial: async (n) => {
       await Promise.resolve();
-      if (hit('copy', n)) throw new Error('copy failed');
       if (dest.has(`${n}.partial`)) throw new Error('exists');
-      dest.set(`${n}.partial`, hit('truncate', n) ? 1 : (source[n] ?? -1));
-    },
-    moveDestinationToBackup: async (n) => {
-      if (hit('backup', n)) throw new Error('backup failed');
-      await rename(n, `${n}.backup`);
+      if (hit('copy', n)) throw new Error('copy failed');
+      const content = source[n] ?? '';
+      if (hit('copyInterrupted', n)) {
+        dest.set(`${n}.partial`, content.slice(0, 2)); // killed while writing
+        throw new Error('interrupted');
+      }
+      dest.set(`${n}.partial`, hit('truncate', n) ? content.slice(0, 2) : content);
     },
     promotePartial: async (n) => {
+      await Promise.resolve();
       if (hit('promote', n)) throw new Error('promote failed');
-      await rename(`${n}.partial`, n);
-    },
-    restoreBackup: async (n) => {
-      if (hit('restore', n)) throw new Error('restore failed');
-      await rename(`${n}.backup`, n);
+      if (dest.has(n)) throw new Error('exists');
+      const content = dest.get(`${n}.partial`) ?? '';
+      if (hit('promoteInterrupted', n)) {
+        dest.set(n, content.slice(0, 2));
+        throw new Error('interrupted');
+      }
+      dest.set(n, hit('corruptPromote', n) ? 'zz' : content);
+      dest.delete(`${n}.partial`);
     },
     discardPartial: (n) => void dest.delete(`${n}.partial`),
-    discardBackup: (n) => void dest.delete(`${n}.backup`),
     discardDestination: (n) => void dest.delete(n),
   };
   const files = () => Object.fromEntries(dest);
-  return { ops, dest, files, fail, failAll, clearFaults, source };
+  return { ops, dest, files, fail, failAll, clearFaults };
 }
 
+const A = 'AAAA-image-a';
+const B = 'BBBB-image-b';
+
 describe('copyImageFiles', () => {
-  it('copies new images and leaves no partial or backup files', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 10, 'b.jpg': 20 });
+  it('copies new images and leaves no partial files', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A, 'b.jpg': B });
     expect(await copyImageFiles(fs.ops)).toBe(0);
-    expect(fs.files()).toEqual({ 'a.jpg': 10, 'b.jpg': 20 });
+    expect(fs.files()).toEqual({ 'a.jpg': A, 'b.jpg': B });
   });
 
-  it('skips an existing image whose size matches', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 10 }, { 'a.jpg': 10 });
+  it('skips an existing identical image without copying', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A }, { 'a.jpg': A });
     const copy = jest.spyOn(fs.ops, 'copyToPartial');
     expect(await copyImageFiles(fs.ops)).toBe(0);
     expect(copy).not.toHaveBeenCalled();
   });
 
-  it('replaces a wrong-sized existing image via backup and then removes the backup', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg': 4 });
-    expect(await copyImageFiles(fs.ops)).toBe(0);
-    expect(fs.files()).toEqual({ 'a.jpg': 30 });
+  it('keeps an existing image of the same size but different content and reports a failure', async () => {
+    const other = 'XXXX-image-a'; // same length as A
+    const fs = createFakeFiles({ 'a.jpg': A }, { 'a.jpg': other });
+    expect(await copyImageFiles(fs.ops)).toBe(1);
+    expect(fs.files()).toEqual({ 'a.jpg': other });
   });
 
-  it('fails when copying to .partial fails and keeps the existing image', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30, 'b.jpg': 5 }, { 'a.jpg': 4 });
+  it('never replaces or deletes an existing different image', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A }, { 'a.jpg': 'old' });
+    const discard = jest.spyOn(fs.ops, 'discardDestination');
+    expect(await copyImageFiles(fs.ops)).toBe(1);
+    expect(discard).not.toHaveBeenCalled();
+    expect(fs.files()).toEqual({ 'a.jpg': 'old' });
+  });
+
+  it('fails when copying to .partial fails and creates no final file', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A, 'b.jpg': B });
     fs.fail('copy', 'a.jpg');
     expect(await copyImageFiles(fs.ops)).toBe(1);
-    expect(fs.files()).toEqual({ 'a.jpg': 4, 'b.jpg': 5 });
+    expect(fs.files()).toEqual({ 'b.jpg': B });
   });
 
-  it('fails when the .partial size does not match and keeps the existing image', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg': 4 });
-    fs.fail('truncate', 'a.jpg');
-    expect(await copyImageFiles(fs.ops)).toBe(1);
-    expect(fs.files()).toEqual({ 'a.jpg': 4 });
-  });
-
-  it('does not create a final file for a new image whose partial is truncated', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 });
+  it('fails when the .partial content does not verify, discards it, and creates no final file', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A });
     fs.fail('truncate', 'a.jpg');
     expect(await copyImageFiles(fs.ops)).toBe(1);
     expect(fs.files()).toEqual({});
   });
 
-  it('fails when the existing image cannot be backed up, leaving it untouched', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg': 4 });
-    fs.fail('backup', 'a.jpg');
+  it('recovers from a copy killed mid-write (unverified .partial is discarded and copied again)', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A });
+    fs.fail('copyInterrupted', 'a.jpg');
     expect(await copyImageFiles(fs.ops)).toBe(1);
-    expect(fs.files()).toEqual({ 'a.jpg': 4 });
-  });
-
-  it('restores the existing image when moving the new one into place fails', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg': 4 });
-    fs.fail('promote', 'a.jpg');
-    expect(await copyImageFiles(fs.ops)).toBe(1);
-    expect(fs.files()).toEqual({ 'a.jpg': 4 });
-  });
-
-  it('propagates a restore failure, keeps the backup, and recovers it on the next run', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30, 'b.jpg': 5 }, { 'a.jpg': 4 });
-    fs.fail('promote', 'a.jpg');
-    fs.fail('restore', 'a.jpg');
-    fs.failAll('promote');
-    fs.failAll('restore');
-    const error = await copyImageFiles(fs.ops).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ImageRestoreError);
-    expect((error as ImageRestoreError).fileNames).toEqual(['a.jpg']);
-    expect(fs.files()['a.jpg.backup']).toBe(4); // the old image is still on disk
-    expect(fs.files()['a.jpg.partial']).toBeUndefined();
-
+    expect(fs.files()).toEqual({ 'a.jpg.partial': A.slice(0, 2) });
     fs.clearFaults();
     expect(await copyImageFiles(fs.ops)).toBe(0);
-    expect(fs.files()).toEqual({ 'a.jpg': 30, 'b.jpg': 5 });
+    expect(fs.files()).toEqual({ 'a.jpg': A });
   });
 
-  it('recovers from a leftover .backup whose destination is missing (crash before promotion)', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg.backup': 4, 'a.jpg.partial': 30 });
+  it('moves a leftover verified .partial into place without copying again', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A }, { 'a.jpg.partial': A });
+    const copy = jest.spyOn(fs.ops, 'copyToPartial');
     expect(await copyImageFiles(fs.ops)).toBe(0);
-    expect(fs.files()).toEqual({ 'a.jpg': 30 });
+    expect(copy).not.toHaveBeenCalled();
+    expect(fs.files()).toEqual({ 'a.jpg': A });
   });
 
-  it('keeps the old image when recovery works but the retry copy fails', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg.backup': 4 });
-    fs.fail('copy', 'a.jpg');
+  it('discards a leftover .partial with wrong content and copies again', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A }, { 'a.jpg.partial': 'junk' });
+    expect(await copyImageFiles(fs.ops)).toBe(0);
+    expect(fs.files()).toEqual({ 'a.jpg': A });
+  });
+
+  it('drops a leftover .partial next to a complete destination', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A }, { 'a.jpg': A, 'a.jpg.partial': A });
+    expect(await copyImageFiles(fs.ops)).toBe(0);
+    expect(fs.files()).toEqual({ 'a.jpg': A });
+  });
+
+  it('fails when moving into place fails, keeping the verified .partial for the retry', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A });
+    fs.fail('promote', 'a.jpg');
     expect(await copyImageFiles(fs.ops)).toBe(1);
-    expect(fs.files()).toEqual({ 'a.jpg': 4 });
-  });
-
-  it('fails without a marker-worthy result when the leftover backup cannot be restored', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg.backup': 4 });
-    fs.failAll('restore');
-    await expect(copyImageFiles(fs.ops)).rejects.toBeInstanceOf(ImageRestoreError);
-    expect(fs.files()).toEqual({ 'a.jpg.backup': 4 });
-  });
-
-  it('drops a stale .backup next to a complete destination (crash after promotion)', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg': 30, 'a.jpg.backup': 4 });
+    expect(fs.files()).toEqual({ 'a.jpg.partial': A });
+    fs.clearFaults();
     expect(await copyImageFiles(fs.ops)).toBe(0);
-    expect(fs.files()).toEqual({ 'a.jpg': 30 });
+    expect(fs.files()).toEqual({ 'a.jpg': A });
   });
 
-  it('keeps both files when destination and backup are both wrong-sized', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg': 4, 'a.jpg.backup': 6 });
+  it('recovers from a move killed mid-way (truncated final file + intact .partial)', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A });
+    fs.fail('promoteInterrupted', 'a.jpg');
     expect(await copyImageFiles(fs.ops)).toBe(1);
-    expect(fs.files()).toEqual({ 'a.jpg': 4, 'a.jpg.backup': 6 });
+    expect(fs.files()).toEqual({ 'a.jpg': A.slice(0, 2), 'a.jpg.partial': A });
+    fs.clearFaults();
+    expect(await copyImageFiles(fs.ops)).toBe(0);
+    expect(fs.files()).toEqual({ 'a.jpg': A });
   });
 
-  it('discards a leftover .partial and copies again', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg.partial': 7 });
+  it('does not delete a mismatching final file that is not a prefix of the verified .partial', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A }, { 'a.jpg': 'healthy-other', 'a.jpg.partial': A });
+    expect(await copyImageFiles(fs.ops)).toBe(1);
+    expect(fs.files()).toEqual({ 'a.jpg': 'healthy-other', 'a.jpg.partial': A });
+  });
+
+  it('does not delete a mismatching final file when the .partial itself is unverified', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A }, { 'a.jpg': A.slice(0, 2), 'a.jpg.partial': A.slice(0, 5) });
+    expect(await copyImageFiles(fs.ops)).toBe(1);
+    expect(fs.files()).toEqual({ 'a.jpg': A.slice(0, 2), 'a.jpg.partial': A.slice(0, 5) });
+  });
+
+  it('reports a failure when the moved file does not verify, and keeps it for inspection', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A });
+    fs.fail('corruptPromote', 'a.jpg');
+    expect(await copyImageFiles(fs.ops)).toBe(1);
+    expect(fs.files()).toEqual({ 'a.jpg': 'zz' });
+    fs.clearFaults();
+    expect(await copyImageFiles(fs.ops)).toBe(1); // still not overwritten
+    expect(fs.files()).toEqual({ 'a.jpg': 'zz' });
+  });
+
+  it('retries after a failed import and only copies what is still missing', async () => {
+    const fs = createFakeFiles({ 'a.jpg': A, 'b.jpg': B });
+    fs.fail('copy', 'b.jpg');
+    expect(await copyImageFiles(fs.ops)).toBe(1);
+    fs.clearFaults();
+    const copy = jest.spyOn(fs.ops, 'copyToPartial');
     expect(await copyImageFiles(fs.ops)).toBe(0);
-    expect(fs.files()).toEqual({ 'a.jpg': 30 });
+    expect(copy).toHaveBeenCalledTimes(1);
+    expect(fs.files()).toEqual({ 'a.jpg': A, 'b.jpg': B });
   });
 
   it('is idempotent when the same import runs again', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30, 'b.jpg': 5 }, { 'b.jpg': 1 });
+    const fs = createFakeFiles({ 'a.jpg': A, 'b.jpg': B });
     expect(await copyImageFiles(fs.ops)).toBe(0);
     const copy = jest.spyOn(fs.ops, 'copyToPartial');
     expect(await copyImageFiles(fs.ops)).toBe(0);
     expect(copy).not.toHaveBeenCalled();
-    expect(fs.files()).toEqual({ 'a.jpg': 30, 'b.jpg': 5 });
+    expect(fs.files()).toEqual({ 'a.jpg': A, 'b.jpg': B });
   });
 
   it('never modifies the source', async () => {
-    const source = { 'a.jpg': 30 };
-    const fs = createFakeFiles(source, { 'a.jpg': 4 });
+    const source = { 'a.jpg': A };
+    const fs = createFakeFiles(source, { 'a.jpg': 'old' });
     fs.fail('promote', 'a.jpg');
     await copyImageFiles(fs.ops);
-    expect(source).toEqual({ 'a.jpg': 30 });
+    expect(source).toEqual({ 'a.jpg': A });
   });
 });
 
 describe('copyImageFilesExclusive', () => {
   it('serializes overlapping runs so they do not collide on .partial files', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30, 'b.jpg': 5 });
+    const fs = createFakeFiles({ 'a.jpg': A, 'b.jpg': B });
     const results = await Promise.all([copyImageFilesExclusive(fs.ops), copyImageFilesExclusive(fs.ops)]);
     expect(results).toEqual([0, 0]);
-    expect(fs.files()).toEqual({ 'a.jpg': 30, 'b.jpg': 5 });
+    expect(fs.files()).toEqual({ 'a.jpg': A, 'b.jpg': B });
   });
 
   it('keeps working after a run rejected', async () => {
-    const fs = createFakeFiles({ 'a.jpg': 30 }, { 'a.jpg': 4 });
-    fs.failAll('promote');
-    fs.failAll('restore');
-    await expect(copyImageFilesExclusive(fs.ops)).rejects.toBeInstanceOf(ImageRestoreError);
-    fs.clearFaults();
+    const fs = createFakeFiles({ 'a.jpg': A });
+    jest.spyOn(fs.ops, 'listSource').mockImplementationOnce(() => {
+      throw new Error('list failed');
+    });
+    await expect(copyImageFilesExclusive(fs.ops)).rejects.toThrow('list failed');
     expect(await copyImageFilesExclusive(fs.ops)).toBe(0);
-    expect(fs.files()).toEqual({ 'a.jpg': 30 });
+    expect(fs.files()).toEqual({ 'a.jpg': A });
   });
 });

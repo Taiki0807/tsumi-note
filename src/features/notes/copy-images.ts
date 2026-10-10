@@ -1,144 +1,108 @@
 /**
  * Minimal file operations needed to copy a directory of images; implemented with expo-file-system.
  *
- * Every `move*` / `restore*` operation MUST be a plain rename that fails when the target exists
- * (no `overwrite` option: expo's overwrite deletes the target before moving, which could lose data).
- * Sizes return `undefined` when the file does not exist.
+ * Note images are immutable: the file name is a fresh ID (`<id>.<ext>`, see note-images.ts), so the same
+ * name always means the same bytes. The import therefore never replaces or backs up an existing file;
+ * it only adds missing ones. `promotePartial` MUST be a plain `move` that fails when the target exists
+ * (no `overwrite`: expo's overwrite deletes the target first).
+ *
+ * Hashes are content hashes (SHA-256 hex); `undefined` means the file does not exist.
  */
 export type ImageCopyOps = {
   /** File names in the source directory. */
   listSource: () => string[];
-  sourceSize: (fileName: string) => number;
-  destinationSize: (fileName: string) => number | undefined;
-  partialSize: (fileName: string) => number | undefined;
-  backupSize: (fileName: string) => number | undefined;
+  sourceHash: (fileName: string) => Promise<string>;
+  destinationHash: (fileName: string) => Promise<string | undefined>;
+  partialHash: (fileName: string) => Promise<string | undefined>;
+  /** True when the destination file's bytes are a (shorter or equal) prefix of the `.partial` file's bytes. */
+  destinationIsPrefixOfPartial: (fileName: string) => Promise<boolean>;
   /** Copies source → `<fileName>.partial`; rejects on failure. The partial must not exist. */
   copyToPartial: (fileName: string) => Promise<void>;
-  /** Moves the destination file to `<fileName>.backup`. The backup must not exist. */
-  moveDestinationToBackup: (fileName: string) => Promise<void>;
   /** Moves `<fileName>.partial` to the destination. The destination must not exist. */
   promotePartial: (fileName: string) => Promise<void>;
-  /** Moves `<fileName>.backup` back to the destination. The destination must not exist. */
-  restoreBackup: (fileName: string) => Promise<void>;
   discardPartial: (fileName: string) => Promise<void> | void;
-  discardBackup: (fileName: string) => Promise<void> | void;
-  /** Deletes a destination file; only used when a complete backup is about to replace a wrong-sized one. */
+  /** Deletes a destination file; only used for a file proven to be an incomplete copy of the partial. */
   discardDestination: (fileName: string) => Promise<void> | void;
 };
 
-/** An old destination file could not be put back; it stays as `<name>.backup` and is recovered on the next run. */
-export class ImageRestoreError extends Error {
-  readonly fileNames: string[];
-
-  constructor(fileNames: string[], options?: { cause?: unknown }) {
-    super(`Could not restore existing images: ${fileNames.join(', ')}`, options);
-    this.name = 'ImageRestoreError';
-    this.fileNames = fileNames;
-  }
-}
-
-class RestoreFailure extends Error {
-  constructor(options: { cause: unknown }) {
-    super('restore failed', options);
+/** A destination file differs from the guest image and could not be proven to be our own unfinished copy. */
+export class ImageConflictError extends Error {
+  constructor(readonly fileName: string) {
+    super(`Existing image differs from the guest image and was kept: ${fileName}`);
+    this.name = 'ImageConflictError';
   }
 }
 
 /**
- * Per-file procedure (an existing file is never deleted before its replacement is in place):
- *  1. Recover leftovers of an interrupted run: a `.backup` whose destination is missing is moved back; a
- *     stale `.backup` next to a complete destination is dropped; a `.partial` is discarded (unverified).
- *  2. A destination whose size matches the source is reused.
- *  3. Copy source → `.partial` and verify its size.
- *  4. If a (wrong-sized) destination exists, move it to `.backup`; then move `.partial` into place.
- *  5. If step 4 fails, move `.backup` back. Only after the new file is in place is the backup deleted.
- * The guest source is only read. Failures are counted per file so the caller can refuse to record the
- * import and retry; if an old file could not be restored, an {@link ImageRestoreError} is thrown at the end.
+ * State of one image after a crash at any point (the guest source is only ever read):
+ *
+ * | destination        | `.partial`            | meaning / action                                              |
+ * |--------------------|-----------------------|---------------------------------------------------------------|
+ * | hash = source      | any                   | done; drop the partial (our own temp file)                     |
+ * | missing            | missing               | copy to `.partial`                                             |
+ * | missing            | hash = source         | verified copy; just move it into place                         |
+ * | missing            | other hash            | interrupted copy; discard it and copy again                    |
+ * | other hash         | hash = source, and the destination is a prefix of it | interrupted `move` (Android may copy-then-delete): the destination is an unfinished copy of the partial → delete it, move the verified partial |
+ * | other hash         | anything else         | cannot be proven ours → keep it, fail (never overwrite)        |
+ *
+ * `.partial` is only created while the destination is missing, and the sole writer of the destination is
+ * the promote step; a deletion happens only for a destination proven to be a prefix of a verified copy.
+ * After promotion the destination is hashed again. Any failure counts the file as failed so the caller
+ * does not record the import and the user can retry; finished files are reused on the retry.
  *
  * @returns the number of files that could not be copied.
  */
 export async function copyImageFiles(ops: ImageCopyOps): Promise<number> {
   let failed = 0;
-  const unrestored: string[] = [];
-  let firstRestoreCause: unknown;
   for (const fileName of ops.listSource()) {
     try {
       await copyOne(ops, fileName);
-    } catch (error) {
+    } catch {
       failed += 1;
-      if (error instanceof RestoreFailure) {
-        unrestored.push(fileName);
-        firstRestoreCause ??= error.cause;
-      }
-      try {
-        await ops.discardPartial(fileName);
-      } catch {
-        // Best effort; a leftover partial is discarded on the next attempt.
-      }
     }
   }
-  if (unrestored.length > 0) throw new ImageRestoreError(unrestored, { cause: firstRestoreCause });
   return failed;
 }
 
-async function restore(ops: ImageCopyOps, fileName: string): Promise<void> {
-  try {
-    await ops.restoreBackup(fileName);
-  } catch (cause) {
-    throw new RestoreFailure({ cause });
-  }
-}
-
 async function copyOne(ops: ImageCopyOps, fileName: string): Promise<void> {
-  const expected = ops.sourceSize(fileName);
-  await recoverLeftovers(ops, fileName, expected);
-  const existing = ops.destinationSize(fileName);
-  if (existing === expected) return;
+  const expected = await ops.sourceHash(fileName);
 
-  await ops.copyToPartial(fileName);
-  if (ops.partialSize(fileName) !== expected) throw new Error('size mismatch');
-
-  if (existing === undefined) {
-    await ops.promotePartial(fileName);
+  const destination = await ops.destinationHash(fileName);
+  if (destination === expected) {
+    await ops.discardPartial(fileName);
     return;
   }
-  await ops.moveDestinationToBackup(fileName); // on failure the destination is untouched
-  try {
-    await ops.promotePartial(fileName);
-  } catch (promoteError) {
-    await restore(ops, fileName);
-    throw promoteError;
-  }
-  try {
-    await ops.discardBackup(fileName);
-  } catch {
-    // The new file is in place; a stale backup is dropped by the recovery step of the next run.
-  }
-}
 
-/** Step 1: brings leftovers of an interrupted run back to a state where nothing is lost. */
-async function recoverLeftovers(ops: ImageCopyOps, fileName: string, expected: number): Promise<void> {
-  const backup = ops.backupSize(fileName);
-  if (backup !== undefined) {
-    const destination = ops.destinationSize(fileName);
-    if (destination === undefined) {
-      await restore(ops, fileName);
-    } else if (destination === expected) {
-      await ops.discardBackup(fileName); // promotion finished, only the cleanup was interrupted
-    } else if (backup === expected) {
-      await ops.discardDestination(fileName); // wrong-sized file; a complete replacement is at hand
-      await restore(ops, fileName);
-    } else {
-      throw new Error('destination and backup both have an unexpected size'); // keep both, retry later
+  let partial = await ops.partialHash(fileName);
+  if (destination !== undefined) {
+    if (partial !== expected || !(await ops.destinationIsPrefixOfPartial(fileName))) {
+      throw new ImageConflictError(fileName);
+    }
+    await ops.discardDestination(fileName);
+  }
+
+  if (partial !== expected) {
+    if (partial !== undefined) await ops.discardPartial(fileName);
+    await ops.copyToPartial(fileName);
+    partial = await ops.partialHash(fileName);
+    if (partial !== expected) {
+      await ops.discardPartial(fileName);
+      throw new Error(`Copied image failed verification: ${fileName}`);
     }
   }
-  await ops.discardPartial(fileName);
+
+  await ops.promotePartial(fileName);
+  // Keep a mismatching destination (and any remaining partial) for the next run's analysis above.
+  if ((await ops.destinationHash(fileName)) !== expected) {
+    throw new Error(`Image failed verification after being moved into place: ${fileName}`);
+  }
 }
 
 let queue: Promise<unknown> = Promise.resolve();
 
 /**
  * Runs {@link copyImageFiles} one at a time, so overlapping imports (double tap, re-entry) never operate
- * on the same `.partial` / `.backup` files concurrently; a later run reuses what already finished.
+ * on the same `.partial` files concurrently; a later run reuses what already finished.
  */
 export function copyImageFilesExclusive(ops: ImageCopyOps): Promise<number> {
   const run = queue.then(() => copyImageFiles(ops));

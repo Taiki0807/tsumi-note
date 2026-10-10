@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -32,27 +33,36 @@ export async function copyGuestImagesToAccount(account: OwnerId): Promise<number
   const from = imageDirectory(GUEST_IMAGE_DIRECTORY);
   const to = imageDirectory(imageDirectoryForOwner(account));
   // Fresh File objects each time: `move()` re-points the object it is called on.
-  const at = (name: string, suffix?: 'partial' | 'backup') =>
-    new File(to, suffix ? `${name}.${suffix}` : name);
-  const sizeOf = (file: File) => (file.exists ? (file.size ?? undefined) : undefined);
+  const at = (name: string, partial = false) => new File(to, partial ? `${name}.partial` : name);
+  const hashOf = async (file: File): Promise<string | undefined> =>
+    file.exists ? sha256Hex(await file.bytes()) : undefined;
   const remove = (file: File) => {
     if (file.exists) file.delete();
   };
-  // No `overwrite` option anywhere: expo deletes the target before moving, so each move targets a free name.
+  // No `overwrite` option: expo deletes the target before moving, so the move targets a free name.
   return copyImageFilesExclusive({
-    listSource: () => from.list().filter((e): e is File => e instanceof File).map((e) => e.name),
-    sourceSize: (name) => new File(from, name).size ?? -1,
-    destinationSize: (name) => sizeOf(at(name)),
-    partialSize: (name) => sizeOf(at(name, 'partial')),
-    backupSize: (name) => sizeOf(at(name, 'backup')),
-    copyToPartial: (name) => new File(from, name).copy(at(name, 'partial')),
-    moveDestinationToBackup: (name) => at(name).move(at(name, 'backup')),
-    promotePartial: (name) => at(name, 'partial').move(at(name)),
-    restoreBackup: (name) => at(name, 'backup').move(at(name)),
-    discardPartial: (name) => remove(at(name, 'partial')),
-    discardBackup: (name) => remove(at(name, 'backup')),
+    listSource: () =>
+      from
+        .list()
+        .filter((e): e is File => e instanceof File)
+        .map((e) => e.name),
+    sourceHash: async (name) => (await hashOf(new File(from, name))) ?? '',
+    destinationHash: (name) => hashOf(at(name)),
+    partialHash: (name) => hashOf(at(name, true)),
+    destinationIsPrefixOfPartial: async (name) => {
+      const [dest, partial] = await Promise.all([at(name).bytes(), at(name, true).bytes()]);
+      return dest.length <= partial.length && dest.every((byte, i) => byte === partial[i]);
+    },
+    copyToPartial: (name) => new File(from, name).copy(at(name, true)),
+    promotePartial: (name) => at(name, true).move(at(name)),
+    discardPartial: (name) => remove(at(name, true)),
     discardDestination: (name) => remove(at(name)),
   });
+}
+
+async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** expo-file-system implementation of {@link ImageFiles}. */
@@ -62,8 +72,8 @@ export const noteImageFiles: ImageFiles = {
       .list()
       .filter((entry): entry is File => entry instanceof File)
       .map((file) => file.name)
-      // `.partial` / `.backup` belong to an import; the orphan sweep must not delete a recoverable backup.
-      .filter((name) => !/\.(partial|backup)$/.test(name)),
+      // `.partial` belongs to an import; the orphan sweep must not delete it mid-copy.
+      .filter((name) => !name.endsWith('.partial')),
   save: async (sourceUri, fileName) => {
     await new File(sourceUri).copy(new File(imageDirectory(), fileName));
   },
