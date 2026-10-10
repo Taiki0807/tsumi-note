@@ -4,6 +4,9 @@ import { Text, View } from 'react-native';
 import { Button } from '@/components/form-ui';
 import { fontFamily, radius, typography, useTheme } from '@/design';
 
+import { describeSync } from '@/sync/describe';
+import { useSync } from '@/sync/sync-provider';
+
 import { useAuth } from './auth-context';
 import { Notice } from './auth-ui';
 import { useSubmit } from './use-submit';
@@ -17,6 +20,7 @@ export function SignedInCard({ email }: { email: string }) {
   const colors = useTheme();
   const { api } = useAuth();
   const { busy, error, run } = useSubmit();
+  const sync = useSync();
   const [done, setDone] = useState(false);
 
   return (
@@ -39,9 +43,15 @@ export function SignedInCard({ email }: { email: string }) {
       >
         {email}
       </Text>
-      <Notice tone="info">
-        ログイン中です。この端末では、アカウント専用の保存領域を使っています。端末間の同期は今後のアップデートで有効になります。ゲストのデータは削除されません。
+      <Notice tone={sync.status === 'error' || sync.status === 'auth-error' ? 'error' : 'info'}>
+        {describeSync(sync)}
       </Notice>
+      <Button
+        variant="secondary"
+        label={sync.status === 'syncing' ? '同期中…' : '今すぐ同期'}
+        disabled={sync.status === 'syncing' || sync.status === 'disabled'}
+        onPress={sync.syncNow}
+      />
       {error ? <Notice tone="error">{error}</Notice> : null}
       <Button
         variant="secondary"

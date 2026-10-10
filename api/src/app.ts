@@ -1,5 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { Auth } from './auth';
+import { pullChanges, pushChanges, type SyncDriver } from './sync/service';
+import { MAX_PUSH_BODY_CHARS, parseCursor, parseLimit, parsePush, ValidationError } from './sync/validate';
 
 /** 認証情報(セッションCookie等)を遷移先URLに載せてはならないエンドポイント */
 const NO_CREDENTIAL_REDIRECT = /^\/api\/auth\/(verify-email|reset-password(\/.*)?)$/;
@@ -44,7 +46,7 @@ type WaitUntil = (promise: Promise<unknown>) => void;
  * Hono アプリ。auth の生成方法(D1 / テスト用SQLite)は呼び出し側が決める。
  * ユーザーIDは必ず検証済みセッションから取得し、リクエスト本文・クエリのIDは信用しない。
  */
-export function createApp(getAuth: (waitUntil?: WaitUntil) => Auth) {
+export function createApp(getAuth: (waitUntil?: WaitUntil) => Auth, getSyncDriver?: () => SyncDriver) {
   const app = new Hono<{ Variables: AppVariables }>();
 
   const waitUntilOf = (c: Context): WaitUntil | undefined => {
@@ -75,6 +77,43 @@ export function createApp(getAuth: (waitUntil?: WaitUntil) => Auth) {
 
   // セッション復元・認可の動作確認用
   app.get('/v1/me', (c) => c.json({ id: c.get('userId') }));
+
+  // ---- 差分同期。ユーザーは常にセッション由来(本文・クエリにユーザーIDは存在しない) ----
+  const syncDriver = (): SyncDriver => {
+    if (!getSyncDriver) throw new Error('sync is not configured');
+    return getSyncDriver();
+  };
+
+  app.post('/v1/sync/push', async (c) => {
+    const declared = Number(c.req.header('content-length') ?? 0);
+    if (declared > MAX_PUSH_BODY_CHARS * 4) return c.json({ error: 'payload_too_large' }, 413);
+    const text = await c.req.text();
+    if (text.length > MAX_PUSH_BODY_CHARS) return c.json({ error: 'payload_too_large' }, 413);
+    try {
+      const { changes } = parsePush(JSON.parse(text));
+      const userId = c.get('userId');
+      const results = await pushChanges(syncDriver(), userId, changes);
+      return c.json({ userId, results });
+    } catch (e) {
+      if (e instanceof ValidationError) return c.json({ error: 'invalid_request', message: e.message }, 400);
+      if (e instanceof SyntaxError)
+        return c.json({ error: 'invalid_request', message: 'JSONが不正です' }, 400);
+      throw e;
+    }
+  });
+
+  app.get('/v1/sync/pull', async (c) => {
+    try {
+      const cursor = parseCursor(c.req.query('cursor'));
+      const limit = parseLimit(c.req.query('limit'));
+      const userId = c.get('userId');
+      const page = await pullChanges(syncDriver(), userId, cursor, limit);
+      return c.json({ userId, ...page });
+    } catch (e) {
+      if (e instanceof ValidationError) return c.json({ error: 'invalid_request', message: e.message }, 400);
+      throw e;
+    }
+  });
 
   return app;
 }

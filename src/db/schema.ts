@@ -1,4 +1,4 @@
-import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
  * Local-first schema (docs/ARCHITECTURE.md §6-§14).
@@ -155,7 +155,35 @@ export const reviewHistory = sqliteTable(
 
 // ---------- Sync ----------
 
-/** Placeholder for Phase 8 (cursor / device id / last synced time). Not used by Phase 1 code. */
+/**
+ * Changes not yet acknowledged by the server (docs/PHASE8_DESIGN.md "差分同期").
+ * Rows are written by SQLite triggers in the same statement (hence the same transaction) as the change,
+ * and only while `sync.capture` is on (account databases that sync). The payload is never copied: the
+ * current row is read when sending, so several edits of one record are sent as one change.
+ */
+export const syncOutbox = sqliteTable(
+  'sync_outbox',
+  {
+    seq: integer('seq').primaryKey({ autoIncrement: true }),
+    entity: text('entity').notNull(),
+    entityId: text('entity_id').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('sync_outbox_entity_idx').on(t.entity, t.entityId)],
+);
+
+/** The server version (`server_seq`) each record was last known at; sent as `baseSeq` to detect concurrent edits. */
+export const syncRecordMeta = sqliteTable(
+  'sync_record_meta',
+  {
+    entity: text('entity').notNull(),
+    entityId: text('entity_id').notNull(),
+    serverSeq: integer('server_seq').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.entity, t.entityId] })],
+);
+
+/** Sync bookkeeping (cursor, last synced time, owner, capture switch). Keys are prefixed `sync.`. */
 export const syncMetadata = sqliteTable('sync_metadata', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
