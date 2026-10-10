@@ -4,6 +4,7 @@ import { createAuth } from './auth';
 import * as schema from './db/schema';
 import { createResendSender } from './email';
 import type { Bindings } from './env';
+import { createD1Driver } from './sync/d1-driver';
 import { parseAppEnvironment } from './redirect-policy';
 
 export default {
@@ -20,21 +21,23 @@ export default {
       console.error(e instanceof Error ? e.message : 'invalid APP_ENV');
       return new Response('Server misconfigured', { status: 500 });
     }
-    const app = createApp((waitUntil) =>
-      createAuth({
-        db: drizzle(env.DB, { schema }),
-        secret: env.BETTER_AUTH_SECRET,
-        baseURL: env.BETTER_AUTH_URL,
-        appScheme: env.APP_SCHEME,
-        sendEmail: createResendSender(env),
-        waitUntil,
-        environment: env.APP_ENV,
-        universalLinkOrigin: env.APP_UNIVERSAL_LINK_ORIGIN,
-        appleBundleId: env.APPLE_APP_BUNDLE_ID || undefined,
-        googleClientIds: env.GOOGLE_CLIENT_IDS?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      }),
+    const app = createApp(
+      (waitUntil) =>
+        createAuth({
+          db: drizzle(env.DB, { schema }),
+          secret: env.BETTER_AUTH_SECRET,
+          baseURL: env.BETTER_AUTH_URL,
+          appScheme: env.APP_SCHEME,
+          sendEmail: createResendSender(env),
+          waitUntil,
+          environment: env.APP_ENV,
+          universalLinkOrigin: env.APP_UNIVERSAL_LINK_ORIGIN,
+          appleBundleId: env.APPLE_APP_BUNDLE_ID || undefined,
+          googleClientIds: env.GOOGLE_CLIENT_IDS?.split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+        }),
+      () => createD1Driver(env.DB),
     );
     return app.fetch(request, env, ctx);
   },

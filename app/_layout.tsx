@@ -20,6 +20,7 @@ import { useTheme } from '@/design';
 import { AuthProvider } from '@/features/auth/auth-context';
 import { GuestImportGate } from '@/features/auth/guest-import-gate';
 import { useApplyStoredSettings } from '@/features/settings/use-settings';
+import { SyncProvider } from '@/sync/sync-provider';
 
 // Keep the native splash until fonts are loaded, then hand over to <SplashView/> while the DB migrates.
 void SplashScreen.preventAutoHideAsync();
@@ -32,10 +33,10 @@ function AppStack() {
   const colors = useTheme();
   useApplyStoredSettings();
   return (
-    <>
+    <SyncProvider>
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
       <GuestImportGate />
-    </>
+    </SyncProvider>
   );
 }
 

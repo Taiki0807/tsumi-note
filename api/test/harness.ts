@@ -6,6 +6,7 @@ import { createApp } from '../src/app';
 import { createAuth } from '../src/auth';
 import * as schema from '../src/db/schema';
 import type { EmailMessage } from '../src/email';
+import type { SqlStatement, SyncDriver } from '../src/sync/service';
 
 const MIGRATIONS_DIR = join(import.meta.dir, '..', 'migrations');
 
@@ -39,7 +40,10 @@ export function createHarness(
       sent.push(m);
     },
   });
-  const app = createApp(() => auth);
+  const app = createApp(
+    () => auth,
+    () => bunDriver(sqlite),
+  );
 
   let ipCounter = 0;
   /** 各リクエストに別のIPを割り当ててレート制限の干渉を避ける。ip を指定すると固定する */
@@ -66,8 +70,32 @@ export function createHarness(
   return { sqlite, sent, request, lastLink };
 }
 
+/** テスト用の同期ドライバー(bun:sqlite)。batch は1トランザクションで、本番D1と同じく全か無 */
+export function bunDriver(sqlite: Database): SyncDriver {
+  return {
+    async all<T>(s: SqlStatement): Promise<T[]> {
+      return sqlite.query(s.sql).all(...(s.params as never[])) as T[];
+    },
+    async batch(statements: SqlStatement[]): Promise<number[]> {
+      const run = sqlite.transaction(() =>
+        statements.map((s) => sqlite.query(s.sql).run(...(s.params as never[])).changes),
+      );
+      return run();
+    },
+  };
+}
+
 export const EMAIL = 'learner@example.com';
 export const PASSWORD = 'study-note-2026';
+
+/** 登録 → メール確認 → ログインして、セッションCookieを返す */
+export async function registerAndLogin(h: ReturnType<typeof createHarness>, email: string): Promise<string> {
+  await signUp(h, email);
+  const link = new URL(h.lastLink());
+  await h.request(`${link.pathname}${link.search}`);
+  const login = await h.request('/api/auth/sign-in/email', { body: { email, password: PASSWORD } });
+  return login.headers.get('set-cookie')!.split(';')[0]!;
+}
 
 export async function signUp(
   h: ReturnType<typeof createHarness>,
