@@ -18,11 +18,14 @@ import { databaseNameForOwner } from '@/db/ownership';
 import { authClient } from '@/features/auth/auth-client';
 import { useAuth } from '@/features/auth/auth-context';
 import { readAuthConfig } from '@/features/auth/config';
+import { noteImageBlobs, sha256Hex } from '@/features/notes/note-image-store';
 
 import { createSyncController, type SyncStatus } from './controller';
-import { runSync } from './engine';
+import { runSync, SyncStoppedError } from './engine';
 import { ENTITIES } from './entities';
-import { createHttpTransport } from './http-transport';
+import { createHttpImageTransport } from './http-image-transport';
+import { createHttpTransport, SyncAuthError } from './http-transport';
+import { liveNoteBodies, pullImages, pushImages, type ImageSyncOptions } from './image-sync';
 import { countPending, getMeta, META } from './local-store';
 
 export type SyncState = {
@@ -102,8 +105,39 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       net = null;
     };
 
+    // 画像: 端末のファイル → R2。D1の同期とは別に、ファイルごとの転送状態で管理する
+    const imageOptions: ImageSyncOptions = {
+      db,
+      files: noteImageBlobs,
+      transport: createHttpImageTransport({ baseUrl: apiUrl, getCookie: () => client.getCookie() }),
+      liveBodies: () => liveNoteBodies(db),
+      sha256: sha256Hex,
+      now: Date.now,
+      isActive: () => active,
+    };
+    /** 画像の失敗(通信・サーバー)でD1の同期を止めない。再ログインとアカウント切替だけは伝える */
+    const imagePhase = async (phase: typeof pushImages) => {
+      try {
+        await phase(imageOptions);
+      } catch (e) {
+        if (e instanceof SyncAuthError || e instanceof SyncStoppedError) throw e;
+      }
+    };
+
     const controller = createSyncController({
-      run: () => runSync({ db, transport, userId, now: Date.now, newId: randomUUID, isActive: () => active }),
+      run: async () => {
+        await imagePhase(pushImages); // ノートの参照より先に、画像の本体をR2へ
+        const summary = await runSync({
+          db,
+          transport,
+          userId,
+          now: Date.now,
+          newId: randomUUID,
+          isActive: () => active,
+        });
+        await imagePhase(pullImages); // 反映されたノートが参照する画像を取得
+        return summary;
+      },
       onChange: (event) => {
         if (!active) return;
         if (event.status === 'syncing') refresh({ status: 'syncing' });

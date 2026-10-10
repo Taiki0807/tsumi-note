@@ -4,6 +4,8 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { GUEST_IMAGE_DIRECTORY, imageDirectoryForOwner, type OwnerId } from '@/db/ownership';
 
+import type { ImageBlobStore } from '@/sync/image-sync';
+
 import { copyImageFilesExclusive } from './copy-images';
 import type { ImageFiles } from './note-images';
 
@@ -60,8 +62,8 @@ export async function copyGuestImagesToAccount(account: OwnerId): Promise<number
   });
 }
 
-async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
-  const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes);
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes as Uint8Array<ArrayBuffer>);
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -82,6 +84,26 @@ export const noteImageFiles: ImageFiles = {
     if (file.exists) file.delete();
   },
   modifiedAt: (fileName) => new File(imageDirectory(), fileName).info().modificationTime ?? undefined,
+};
+
+/**
+ * Byte-level access to the active owner's image directory for cloud sync. A download is written to
+ * `<name>.partial` and moved into place, so a crash never leaves a truncated file under a real name
+ * (`.partial` files are ignored by `noteImageFiles.list`). An existing file is never overwritten.
+ */
+export const noteImageBlobs: ImageBlobStore = {
+  list: () => noteImageFiles.list(),
+  read: (fileName) => new File(imageDirectory(), fileName).bytes(),
+  writeNew: async (fileName, bytes) => {
+    const dir = imageDirectory();
+    const target = new File(dir, fileName);
+    if (target.exists) return;
+    const partial = new File(dir, `${fileName}.partial`);
+    if (partial.exists) partial.delete();
+    partial.create();
+    partial.write(bytes);
+    partial.move(target);
+  },
 };
 
 /** Displayable `file://` URI for a stored image, or `undefined` when the file is missing. */

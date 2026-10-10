@@ -6,6 +6,7 @@ import { createApp } from '../src/app';
 import { createAuth } from '../src/auth';
 import * as schema from '../src/db/schema';
 import type { EmailMessage } from '../src/email';
+import type { ObjectStore } from '../src/images/service';
 import type { SqlStatement, SyncDriver } from '../src/sync/service';
 
 const MIGRATIONS_DIR = join(import.meta.dir, '..', 'migrations');
@@ -40,9 +41,11 @@ export function createHarness(
       sent.push(m);
     },
   });
+  const objects = new Map<string, Uint8Array>();
   const app = createApp(
     () => auth,
     () => bunDriver(sqlite),
+    () => memoryStore(objects),
   );
 
   let ipCounter = 0;
@@ -67,7 +70,42 @@ export function createHarness(
     return m[0];
   }
 
-  return { sqlite, sent, request, lastLink };
+  /** 画像APIへのバイナリ要求(認証はCookie) */
+  async function raw(
+    path: string,
+    init: { method: string; cookie?: string; body?: Uint8Array; headers?: Record<string, string> },
+  ) {
+    return app.request(`${opts.baseURL ?? BASE}${path}`, {
+      method: init.method,
+      headers: {
+        'cf-connecting-ip': `10.1.0.${++ipCounter}`,
+        ...(init.cookie ? { cookie: init.cookie } : {}),
+        ...init.headers,
+      },
+      body: init.body as unknown as BodyInit | undefined,
+      redirect: 'manual',
+    } as RequestInit);
+  }
+
+  return { sqlite, sent, request, raw, objects, lastLink };
+}
+
+/** テスト用のR2代替(メモリ)。キーは本番と同じくサーバーが決めたものがそのまま入る */
+export function memoryStore(objects: Map<string, Uint8Array>): ObjectStore {
+  return {
+    async put(key, data) {
+      objects.set(key, data.slice());
+    },
+    async get(key) {
+      return objects.get(key)?.slice() ?? null;
+    },
+    async head(key) {
+      return objects.has(key);
+    },
+    async delete(key) {
+      objects.delete(key);
+    },
+  };
 }
 
 /** テスト用の同期ドライバー(bun:sqlite)。batch は1トランザクションで、本番D1と同じく全か無 */
