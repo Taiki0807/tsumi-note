@@ -1,3 +1,4 @@
+import { isDeletionRequested } from '../account/service';
 import type { SyncDriver } from '../sync/service';
 import { ImageError, kindFromFileName, validateUpload } from './validate';
 
@@ -57,22 +58,77 @@ export async function putImage(
   const existing = await findRow(driver, userId, input.fileName);
   if (existing && existing.sha256 !== sha256) throw new ImageError(409, 'file_name_conflict');
 
-  // 同じ内容が既にあれば本体は再アップロードしない(重複排除)。念のためR2に実在するか確認する
-  const key = keyFor(userId, sha256);
-  const present = await store.head(key);
-  if (!present) await store.put(key, input.bytes, contentType);
-
-  // R2 への保存が成功してから行を書く(行がある = 本体がある)。削除済みの同名は復活させる
-  await driver.batch([
+  // 書き込みの前に「進行中のアップロード」を記録する。削除依頼が出ていれば作れない(1文で原子的)。
+  // アカウント削除はこの記録が残る間は完了しないので、削除後のR2書き込みが残ることがない。
+  const uploadId = crypto.randomUUID();
+  const [started] = await driver.batch([
     {
-      sql: `INSERT INTO image_objects
-              (user_id, file_name, sha256, size, content_type, r2_key, created_at, deleted_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-            ON CONFLICT (user_id, file_name) DO UPDATE SET deleted_at = NULL`,
-      params: [userId, input.fileName, sha256, input.bytes.length, contentType, key, now],
+      sql: `INSERT INTO image_uploads (id, user_id, started_at)
+            SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM account_deletions WHERE user_id = ?)`,
+      params: [uploadId, userId, now, userId],
     },
   ]);
+  if (started !== 1) throw new ImageError(401, 'account_deleted');
+
+  const key = keyFor(userId, sha256);
+  let present = false;
+  try {
+    // 同じ内容が既にあれば本体は再アップロードしない(重複排除)。念のためR2に実在するか確認する
+    present = await store.head(key);
+    if (!present) await store.put(key, input.bytes, contentType);
+
+    // R2 への保存が成功してから行を書く(行がある = 本体がある)。削除済みの同名は復活させる
+    await driver.batch([
+      {
+        sql: `INSERT INTO image_objects
+                (user_id, file_name, sha256, size, content_type, r2_key, created_at, deleted_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+              ON CONFLICT (user_id, file_name) DO UPDATE SET deleted_at = NULL`,
+        params: [userId, input.fileName, sha256, input.bytes.length, contentType, key, now],
+      },
+    ]);
+  } catch (e) {
+    // 削除中ならユーザー行の削除による外部キー違反などもここに来る。取り消したうえで 401 を返す
+    if (await rollbackIfDeleting(driver, store, userId, key, uploadId)) {
+      throw new ImageError(401, 'account_deleted');
+    }
+    throw e;
+  }
+  // 書き込み後に削除依頼が出ていたら、この書き込みを自分で取り消す(削除側の掃除より後に書いた分の回収)
+  if (await rollbackIfDeleting(driver, store, userId, key, uploadId)) {
+    throw new ImageError(401, 'account_deleted');
+  }
+  await driver.batch([{ sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] }]);
   return { sha256, size: input.bytes.length, deduplicated: present };
+}
+
+/**
+ * 削除依頼が出ていれば、書き込んだオブジェクトを取り消して true を返す(出ていなければ何もせず false)。
+ * 取り消しに成功した場合だけアップロード記録を消す。失敗したら記録を残し、
+ * 失効後に定期掃除が R2 を再掃除する(それまで削除は完了にならない)。
+ */
+async function rollbackIfDeleting(
+  driver: SyncDriver,
+  store: ObjectStore,
+  userId: string,
+  key: string,
+  uploadId: string,
+): Promise<boolean> {
+  try {
+    if (!(await isDeletionRequested(driver, userId))) return false;
+  } catch {
+    return false;
+  }
+  try {
+    await store.delete(key);
+    await driver.batch([
+      { sql: 'DELETE FROM image_objects WHERE user_id = ? AND r2_key = ?', params: [userId, key] },
+      { sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] },
+    ]);
+  } catch {
+    // 記録を残す
+  }
+  return true;
 }
 
 export async function getImage(

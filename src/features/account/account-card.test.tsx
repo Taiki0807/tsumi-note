@@ -162,13 +162,30 @@ describe('AccountCardView', () => {
     await waitFor(() => expect(props.onDelete).toHaveBeenCalledWith(undefined));
   });
 
-  it('ログイン方法を取得できない間は削除できない', async () => {
+  it('ログイン方法を取得できなくても削除でき、入力したパスワードはそのまま送る(判断はサーバー)', async () => {
     const { props } = await renderCard({ providers: null });
     await press('アカウントを削除');
-    expect(screen.getByText(/アカウント情報を取得できません/)).toBeTruthy();
+    expect(screen.getByText(/ログイン方法を確認できていません/)).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText('現在のパスワード'), 'my-password-1');
     await press('削除する');
-    expect(props.onDelete).not.toHaveBeenCalled();
-    await press('再取得');
+    await waitFor(() => expect(props.onDelete).toHaveBeenCalledWith('my-password-1'));
+    await press('ログイン方法を再取得');
     expect(props.onRetryInfo).toHaveBeenCalled();
+  });
+
+  it('削除が途中で止まっているアカウントでは再試行でき、完了するまで成功と表示しない', async () => {
+    const onDelete = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, kind: 'incomplete', message: '削除を完了できませんでした。' })
+      .mockResolvedValueOnce({ ok: true, data: null });
+    await renderCard({ providers: null, deletionPending: true, onDelete });
+    expect(screen.getByText(/削除が完了していません。削除を再試行してください/)).toBeTruthy();
+    await press('アカウント削除を再試行');
+    expect(screen.getByText(/前回のアカウント削除が完了していません/)).toBeTruthy();
+    await press('削除を再試行');
+    expect(await screen.findByText('削除を完了できませんでした。')).toBeTruthy();
+    expect(screen.queryByText(/削除しました/)).toBeNull();
+    await press('削除を再試行');
+    await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(2));
   });
 });

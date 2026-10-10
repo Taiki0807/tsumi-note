@@ -196,3 +196,167 @@ describe('アカウント削除: 実行', () => {
     expect(await sweepDeletions(bunDriver(h.sqlite), memoryStore(h.objects), 6)).toBe(0);
   });
 });
+
+const gate = () => {
+  let open!: () => void;
+  const promise = new Promise<void>((r) => (open = r));
+  return { promise, open };
+};
+const tick = () => new Promise((r) => setTimeout(r, 20));
+const userObjects = (h: H, id: string) => [...h.objects.keys()].filter((k) => k.startsWith(`u/${id}/`));
+
+describe('アカウント削除と画像アップロードの競合', () => {
+  const upload = (h: H, cookie: string, name: string, bytes: Uint8Array) =>
+    h.raw(`/v1/images/${name}`, {
+      method: 'PUT',
+      cookie,
+      body: bytes,
+      headers: { 'x-content-sha256': sha(bytes), 'content-type': 'image/png' },
+    });
+
+  test('本文の読み込み中に削除が完了しても、再開したアップロードは拒否され、R2に残らない', async () => {
+    const { h, a, idA } = await setup();
+    const bytes = png(7);
+    let push!: (c: Uint8Array) => void;
+    let close!: () => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        push = (c) => ctrl.enqueue(c);
+        close = () => ctrl.close();
+      },
+    });
+    // 本文を途中で止めたPUT(認証ミドルウェアは通過済み)
+    const pending = h.app.request(`${h.baseURL}/v1/images/slow.png`, {
+      method: 'PUT',
+      headers: {
+        cookie: a,
+        'cf-connecting-ip': '10.9.9.9',
+        'x-content-sha256': sha(bytes),
+        'content-type': 'image/png',
+      },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+    push(bytes.slice(0, 4));
+    await tick();
+
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+    expect(userObjects(h, idA)).toEqual([]);
+
+    push(bytes.slice(4));
+    close();
+    expect((await pending).status).toBe(401);
+    expect(userObjects(h, idA)).toEqual([]);
+    expect(count(h, 'image_objects', `user_id = '${idA}'`)).toBe(0);
+  });
+
+  test('R2書き込み中に削除が始まると、削除は完了せず、書き込み側が取り消し、再試行で完了する', async () => {
+    const { h, a, idA, idB } = await setup();
+    const g = gate();
+    h.faults.beforePut = g.promise;
+    const pending = upload(h, a, 'racing.png', png(8));
+    await tick();
+    expect(count(h, 'image_uploads', `user_id = '${idA}'`)).toBe(1);
+
+    const first = await remove(h, a, { confirm: true, password: PASSWORD });
+    expect(first.status).toBe(500); // 進行中のアップロードがあるため完了にしない
+    expect(count(h, 'user', `id = '${idA}'`)).toBe(1);
+    expect(count(h, 'account_deletions', `user_id = '${idA}' AND completed_at IS NOT NULL`)).toBe(0);
+
+    g.open(); // 止まっていたR2書き込みが再開
+    expect((await pending).status).toBe(401);
+    h.faults.beforePut = null;
+    expect(userObjects(h, idA)).toEqual([]); // 書き込み側が自分で取り消した
+    expect(count(h, 'image_uploads', `user_id = '${idA}'`)).toBe(0);
+
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+    expect(count(h, 'account_deletions', `user_id = '${idA}' AND completed_at IS NOT NULL`)).toBe(1);
+    expect(userObjects(h, idA)).toEqual([]);
+    expect(userObjects(h, idB).length).toBe(1);
+  });
+
+  test('失効したアップロード記録があっても削除は完了でき、遅れた書き込みも回収される', async () => {
+    const { h, a, idA } = await setup();
+    const g = gate();
+    h.faults.beforePut = g.promise;
+    const pending = upload(h, a, 'late.png', png(9));
+    await tick();
+    h.sqlite.run('UPDATE image_uploads SET started_at = 0 WHERE user_id = ?', [idA]); // 失効扱い
+
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+    g.open(); // 削除完了後に遅れて書き込まれる
+    const res = await pending;
+    h.faults.beforePut = null;
+    expect(res.status).toBe(401);
+    expect(userObjects(h, idA)).toEqual([]);
+  });
+
+  test('取り消しにも失敗した残骸は、記録が失効した後の定期掃除で回収される', async () => {
+    const { h, a, idA } = await setup();
+    const g = gate();
+    h.faults.beforePut = g.promise;
+    const pending = upload(h, a, 'stuck.png', png(10));
+    await tick();
+    h.sqlite.run('UPDATE image_uploads SET started_at = 1000 WHERE user_id = ?', [idA]);
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+
+    // 書き込みは再開されたが、取り消し(delete)も失敗する
+    const orig = h.objects.delete.bind(h.objects);
+    h.objects.delete = () => {
+      throw new Error('R2 unavailable');
+    };
+    g.open();
+    await pending;
+    h.objects.delete = orig;
+    h.faults.beforePut = null;
+    expect(userObjects(h, idA).length).toBe(1);
+
+    // 運用上は「完了後に残骸が見つかった」状態を未完了へ戻して再掃除させる想定のため、ここでは記録を再現する
+    h.sqlite.run("INSERT OR REPLACE INTO image_uploads (id, user_id, started_at) VALUES ('s1', ?, 1000)", [idA]);
+    h.sqlite.run('UPDATE account_deletions SET completed_at = NULL WHERE user_id = ?', [idA]);
+    const drv = bunDriver(h.sqlite);
+    expect(await sweepDeletions(drv, memoryStore(h.objects), 1000 + 5 * 60 * 1000)).toBe(0); // まだ有効
+    expect(await sweepDeletions(drv, memoryStore(h.objects), 1000 + 11 * 60 * 1000)).toBe(1);
+    expect(userObjects(h, idA)).toEqual([]);
+    expect(count(h, 'image_uploads', `user_id = '${idA}'`)).toBe(0);
+  });
+
+  test('他アカウントの画像アップロードは影響を受けない', async () => {
+    const { h, a, b } = await setup();
+    h.faults.deletePrefix = true;
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(500);
+    h.faults.deletePrefix = false;
+    expect((await upload(h, b, 'b2.png', png(11))).status).toBe(200);
+  });
+});
+
+describe('削除が途中で止まったアカウントの再試行', () => {
+  test('状態確認と再試行だけが使え、通常のAPIは拒否されたまま', async () => {
+    const { h, a, idA } = await setup();
+    h.faults.deletePrefix = true;
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(500);
+
+    // アプリ再起動後を想定: 同じCookieで状態を取得できる
+    const info = await h.request('/v1/account', { headers: { cookie: a } });
+    expect(info.status).toBe(200);
+    const body = (await info.json()) as any;
+    expect(body.deletionPending).toBe(true);
+    expect(body.providers).toEqual(['credential']);
+
+    expect((await h.request('/v1/sync/pull?cursor=0', { headers: { cookie: a } })).status).toBe(401);
+    expect((await h.raw('/v1/images/a1.png', { method: 'GET', cookie: a })).status).toBe(401);
+    expect((await h.request('/v1/me', { headers: { cookie: a } })).status).toBe(401);
+
+    // 再試行にも本人確認が要る
+    expect((await remove(h, a, { confirm: true })).status).toBe(403);
+    h.faults.deletePrefix = false;
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+    expect(count(h, 'user', `id = '${idA}'`)).toBe(0);
+  });
+
+  test('通常のアカウントは deletionPending=false', async () => {
+    const { h, a } = await setup();
+    const body = (await (await h.request('/v1/account', { headers: { cookie: a } })).json()) as any;
+    expect(body.deletionPending).toBe(false);
+  });
+});

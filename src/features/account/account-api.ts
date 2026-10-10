@@ -2,7 +2,12 @@
  * アカウント情報の取得と削除のAPIクライアント。対象は常にセッション(Cookie)のユーザーで、
  * ユーザーIDはリクエストに載せない。削除はサーバーが完了を返すまで「成功」にしない。
  */
-export type AccountInfo = { email: string; providers: string[] };
+export type AccountInfo = {
+  email: string;
+  providers: string[];
+  /** 削除が途中で止まっている(サーバーに削除依頼が残っている)。再試行で完了させる */
+  deletionPending: boolean;
+};
 
 export type AccountFailureKind =
   | 'password_required'
@@ -77,13 +82,18 @@ export function createAccountApi({ baseUrl, getCookie, fetchImpl = fetch, timeou
         const res = await send('GET');
         if (!res || res.status === 401) return fail('session_invalid');
         if (!res.ok) return fail('unknown');
-        const json = (await res.json()) as { email?: unknown; providers?: unknown };
+        const json = (await res.json()) as {
+          email?: unknown;
+          providers?: unknown;
+          deletionPending?: unknown;
+        };
         if (typeof json.email !== 'string' || !Array.isArray(json.providers)) return fail('unknown');
         return {
           ok: true,
           data: {
             email: json.email,
             providers: json.providers.filter((p): p is string => typeof p === 'string'),
+            deletionPending: json.deletionPending === true,
           },
         };
       } catch (e) {

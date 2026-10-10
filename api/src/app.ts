@@ -91,9 +91,11 @@ export function createApp(
     c.set('userId', session.user.id);
     c.set('email', session.user.email);
     c.set('sessionCreatedAt', new Date(session.session.createdAt).getTime());
-    // 削除を依頼済みのアカウントは、削除の再試行以外すべて拒否する(他端末からの再同期・再アップロードを遮断)
-    const isDeleteRetry = c.req.method === 'DELETE' && c.req.path === '/v1/account';
-    if (getSyncDriver && !isDeleteRetry && (await isDeletionRequested(getSyncDriver(), session.user.id))) {
+    // 削除を依頼済みのアカウントは、削除の状態確認(GET)と再試行(DELETE)以外すべて拒否する
+    // (他端末からの再同期・再アップロードを遮断)。削除の再試行は引き続きパスワード/直近ログインで本人確認する
+    const isAccountEndpoint =
+      c.req.path === '/v1/account' && (c.req.method === 'GET' || c.req.method === 'DELETE');
+    if (getSyncDriver && !isAccountEndpoint && (await isDeletionRequested(getSyncDriver(), session.user.id))) {
       return c.json({ error: 'account_deleted' }, 401);
     }
     await next();
@@ -104,8 +106,11 @@ export function createApp(
 
   // ---- アカウント情報・削除。対象は常にセッション由来のユーザー(他人のIDは指定できない) ----
   app.get('/v1/account', async (c) => {
-    const providers = await listProviders(syncDriver(), c.get('userId'));
-    return c.json({ id: c.get('userId'), email: c.get('email'), providers });
+    const driver = syncDriver();
+    const providers = await listProviders(driver, c.get('userId'));
+    // 削除が途中で止まっているアカウントは deletionPending=true(アプリは削除の再試行を案内する)
+    const deletionPending = await isDeletionRequested(driver, c.get('userId'));
+    return c.json({ id: c.get('userId'), email: c.get('email'), providers, deletionPending });
   });
 
   app.delete('/v1/account', async (c) => {

@@ -21,6 +21,8 @@ type Props = {
   email: string;
   /** ログイン方法。取得できていない間は null */
   providers: string[] | null;
+  /** サーバーに削除依頼が残っている(前回の削除が途中で止まった)。再試行で完了させる */
+  deletionPending?: boolean;
   sync: AccountSync;
   onLogout: () => Promise<AccountResult<unknown> | { ok: boolean; message?: string }>;
   onDelete: (password?: string) => Promise<AccountResult<unknown>>;
@@ -34,7 +36,15 @@ type Sheet = 'none' | 'logout' | 'delete';
  * ログイン中のマイページのアカウントカード。Figma 16(マイページ・登録済み)は取得できていないため、
  * 既存のデザイントークンとコンポーネントで構成した仮実装(Figma準拠は未確認)。
  */
-export function AccountCardView({ email, providers, sync, onLogout, onDelete, onRetryInfo }: Props) {
+export function AccountCardView({
+  email,
+  providers,
+  deletionPending = false,
+  sync,
+  onLogout,
+  onDelete,
+  onRetryInfo,
+}: Props) {
   const colors = useTheme();
   const [sheet, setSheet] = useState<Sheet>('none');
   const [busy, setBusy] = useState(false);
@@ -134,7 +144,14 @@ export function AccountCardView({ email, providers, sync, onLogout, onDelete, on
         onPress={sync.syncNow}
       />
       <Button variant="secondary" label="ログアウト" onPress={() => setSheet('logout')} />
-      <Button variant="danger" label="アカウントを削除" onPress={() => setSheet('delete')} />
+      {deletionPending ? (
+        <Notice tone="error">アカウントの削除が完了していません。削除を再試行してください。</Notice>
+      ) : null}
+      <Button
+        variant="danger"
+        label={deletionPending ? 'アカウント削除を再試行' : 'アカウントを削除'}
+        onPress={() => setSheet('delete')}
+      />
 
       <BottomSheet visible={sheet === 'logout'} onClose={close} gap={16}>
         {heading('ログアウトしますか？')}
@@ -162,10 +179,23 @@ export function AccountCardView({ email, providers, sync, onLogout, onDelete, on
           '次のデータを完全に削除します。元に戻すことはできません。\n・アカウント情報(メールアドレス・ログイン方法)\n・クラウドに保存された学習記録・ノート・問題・復習の状態・目標\n・クラウド上のノート画像\n・この端末に保存されているこのアカウントのデータと画像\n他の端末も同期できなくなります。',
         )}
         {body('ゲストとして保存した記録は削除されません。')}
+        {deletionPending ? (
+          <Notice tone="error">
+            前回のアカウント削除が完了していません。もう一度「削除を再試行」を押すと、続きから削除します。
+          </Notice>
+        ) : null}
         {providers === null ? (
           <>
-            <Notice tone="error">アカウント情報を取得できません。接続を確認してください。</Notice>
-            <Button label="再取得" variant="secondary" onPress={onRetryInfo} />
+            <Notice tone="info">
+              ログイン方法を確認できていません。パスワードでログインしている場合は入力してください(Apple / Google のみの場合は空欄のままで構いません)。
+            </Notice>
+            <PasswordInput
+              label="現在のパスワード"
+              value={password}
+              onChangeText={setPassword}
+              editable={!busy}
+            />
+            <Button label="ログイン方法を再取得" variant="secondary" onPress={onRetryInfo} />
           </>
         ) : needsPassword ? (
           <PasswordInput
@@ -183,11 +213,14 @@ export function AccountCardView({ email, providers, sync, onLogout, onDelete, on
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <Button label="キャンセル" variant="secondary" flex disabled={busy} onPress={close} />
           <Button
-            label={busy ? '削除中…' : '削除する'}
+            label={busy ? '削除中…' : deletionPending ? '削除を再試行' : '削除する'}
             variant="danger"
             flex
-            disabled={busy || providers === null || (needsPassword && password.length === 0)}
-            onPress={() => void run(() => onDelete(needsPassword ? password : undefined))}
+            disabled={busy || (needsPassword && password.length === 0)}
+            // ログイン方法が不明なときも妨げない。必要なら入力されたパスワードを送り、判断(本人確認)はサーバーが行う
+            onPress={() =>
+              void run(() => onDelete(needsPassword || providers === null ? password || undefined : undefined))
+            }
           />
         </View>
       </BottomSheet>

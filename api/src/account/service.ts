@@ -7,8 +7,27 @@ export const FRESH_SESSION_MS = 5 * 60 * 1000;
 export const DELETE_ATTEMPT_WINDOW_MS = 60 * 1000;
 export const DELETE_ATTEMPT_MAX = 5;
 
+/** 画像アップロードの有効期間。これを過ぎた記録は異常終了とみなし、削除の完了を妨げない */
+export const UPLOAD_LEASE_MS = 10 * 60 * 1000;
+
+/** 進行中のアップロードがあるため削除を完了できない(アップロードの終了後に再試行で完了する) */
+export class DeletionPendingError extends Error {
+  constructor() {
+    super('uploads in flight');
+  }
+}
+
 export function r2PrefixFor(userId: string): string {
   return `u/${userId}/`;
+}
+
+/** 有効な(失効していない)進行中のアップロードがあるか */
+export async function hasLiveUploads(driver: SyncDriver, userId: string, now: number): Promise<boolean> {
+  const rows = await driver.all<{ n: number }>({
+    sql: 'SELECT COUNT(*) AS n FROM image_uploads WHERE user_id = ? AND started_at > ?',
+    params: [userId, now - UPLOAD_LEASE_MS],
+  });
+  return (rows[0]?.n ?? 0) > 0;
 }
 
 export async function isDeletionRequested(driver: SyncDriver, userId: string): Promise<boolean> {
@@ -82,6 +101,9 @@ export async function deleteAccount(
     },
   ]);
   await store.deletePrefix(r2PrefixFor(userId));
+  // 削除依頼の記録後は新規アップロードを作れない。進行中のものが無ければ以後R2へ書き込まれることもない。
+  // 進行中のものがあれば user 行を残して中断する(アップロード側が書き込み後に自分で取り消す。再試行で完了)
+  if (await hasLiveUploads(driver, userId, now)) throw new DeletionPendingError();
   await driver.batch([
     // 再設定トークンの検証レコード(value にユーザーIDが入る)も消す
     { sql: 'DELETE FROM verification WHERE value = ?', params: [userId] },
@@ -91,6 +113,7 @@ export async function deleteAccount(
   try {
     await store.deletePrefix(r2PrefixFor(userId));
     await driver.batch([
+      { sql: 'DELETE FROM image_uploads WHERE user_id = ?', params: [userId] },
       { sql: 'UPDATE account_deletions SET completed_at = ? WHERE user_id = ?', params: [now, userId] },
     ]);
   } catch (e) {
@@ -109,8 +132,11 @@ export async function sweepDeletions(driver: SyncDriver, store: ObjectStore, now
   });
   let done = 0;
   for (const { user_id } of rows) {
+    // 進行中のアップロードがあれば完了にせず次回へ回す(失効後に再掃除して完了する)
+    if (await hasLiveUploads(driver, user_id, now)) continue;
     await store.deletePrefix(r2PrefixFor(user_id));
     await driver.batch([
+      { sql: 'DELETE FROM image_uploads WHERE user_id = ?', params: [user_id] },
       { sql: 'UPDATE account_deletions SET completed_at = ? WHERE user_id = ?', params: [now, user_id] },
     ]);
     done++;

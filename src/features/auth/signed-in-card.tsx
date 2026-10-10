@@ -19,6 +19,7 @@ export function SignedInCard({ email }: { email: string }) {
   const { api, state } = useAuth();
   const sync = useSync();
   const [providers, setProviders] = useState<string[] | null>(null);
+  const [deletionPending, setDeletionPending] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const userId = state.status === 'signedIn' ? state.user.id : null;
 
@@ -33,7 +34,11 @@ export function SignedInCard({ email }: { email: string }) {
     let active = true;
     const account = accountApi();
     if (!account) return;
-    void account.fetchInfo().then((r) => active && r.ok && setProviders(r.data.providers));
+    void account.fetchInfo().then((r) => {
+      if (!active || !r.ok) return;
+      setProviders(r.data.providers);
+      setDeletionPending(r.data.deletionPending);
+    });
     return () => {
       active = false;
     };
@@ -43,6 +48,7 @@ export function SignedInCard({ email }: { email: string }) {
     <AccountCardView
       email={email}
       providers={providers}
+      deletionPending={deletionPending}
       sync={sync}
       onRetryInfo={() => setAttempt((n) => n + 1)}
       // 進行中の同期は、サインアウトでこの画面ごと破棄されるときに SyncProvider が停止する
