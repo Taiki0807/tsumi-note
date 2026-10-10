@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/d1';
-import { sweepDeletions } from './account/service';
+import { sweepCleanupTasks, sweepDeletions } from './account/service';
 import { createApp } from './app';
 import { createAuth } from './auth';
 import * as schema from './db/schema';
@@ -46,6 +46,9 @@ export default {
   },
   /** 削除済みアカウントの R2 の残骸を掃除する(アカウント削除が途中で失敗した場合の保険) */
   async scheduled(_controller, env) {
-    await sweepDeletions(createD1Driver(env.DB), createR2Store(env.IMAGES), Date.now());
+    const driver = createD1Driver(env.DB);
+    const store = createR2Store(env.IMAGES);
+    await sweepDeletions(driver, store, Date.now());
+    await sweepCleanupTasks(driver, store);
   },
 } satisfies ExportedHandler<Bindings>;

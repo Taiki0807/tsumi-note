@@ -143,3 +143,32 @@ export async function sweepDeletions(driver: SyncDriver, store: ObjectStore, now
   }
   return done;
 }
+
+/**
+ * 永続的な掃除タスク(r2_cleanup_tasks)を処理する(定期実行)。削除が完了済みのアカウントでも対象にする。
+ * 削除依頼のあるユーザーのキーだけを、そのユーザーのプレフィックス配下に限って削除する。
+ * 失敗したタスクは残して次回に再試行する(冪等)。処理を終えた件数を返す。
+ */
+export async function sweepCleanupTasks(driver: SyncDriver, store: ObjectStore): Promise<number> {
+  const rows = await driver.all<{ r2_key: string; user_id: string }>({
+    sql: `SELECT t.r2_key, t.user_id FROM r2_cleanup_tasks t
+          WHERE EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = t.user_id)
+          ORDER BY t.created_at LIMIT 100`,
+    params: [],
+  });
+  let done = 0;
+  for (const { r2_key, user_id } of rows) {
+    if (!r2_key.startsWith(r2PrefixFor(user_id))) continue;
+    try {
+      await store.delete(r2_key);
+      await driver.batch([{ sql: 'DELETE FROM r2_cleanup_tasks WHERE r2_key = ?', params: [r2_key] }]);
+      done++;
+    } catch (e) {
+      console.error('[account] 掃除タスクの実行に失敗しました', e instanceof Error ? e.message : 'unknown');
+      await driver
+        .batch([{ sql: 'UPDATE r2_cleanup_tasks SET attempts = attempts + 1 WHERE r2_key = ?', params: [r2_key] }])
+        .catch(() => undefined);
+    }
+  }
+  return done;
+}

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { bunDriver, createHarness, memoryStore, PASSWORD, registerAndLogin } from './harness';
-import { sweepDeletions } from '../src/account/service';
+import { sweepCleanupTasks, sweepDeletions } from '../src/account/service';
 
 type H = ReturnType<typeof createHarness>;
 
@@ -311,14 +311,54 @@ describe('アカウント削除と画像アップロードの競合', () => {
     h.faults.beforePut = null;
     expect(userObjects(h, idA).length).toBe(1);
 
-    // 運用上は「完了後に残骸が見つかった」状態を未完了へ戻して再掃除させる想定のため、ここでは記録を再現する
-    h.sqlite.run("INSERT OR REPLACE INTO image_uploads (id, user_id, started_at) VALUES ('s1', ?, 1000)", [idA]);
-    h.sqlite.run('UPDATE account_deletions SET completed_at = NULL WHERE user_id = ?', [idA]);
+    // 取り消しの失敗は永続的な掃除タスクとして記録される(削除が完了済みでも、手動の復旧操作は不要)
+    expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(1);
+    expect(count(h, 'account_deletions', `user_id = '${idA}' AND completed_at IS NOT NULL`)).toBe(1);
+
+    // 定期掃除: R2がまだ失敗する間はタスクが残り、回復後に消える。他アカウントの画像は消えない
     const drv = bunDriver(h.sqlite);
-    expect(await sweepDeletions(drv, memoryStore(h.objects), 1000 + 5 * 60 * 1000)).toBe(0); // まだ有効
-    expect(await sweepDeletions(drv, memoryStore(h.objects), 1000 + 11 * 60 * 1000)).toBe(1);
+    const failing = memoryStore(h.objects);
+    failing.delete = async () => {
+      throw new Error('R2 unavailable');
+    };
+    expect(await sweepCleanupTasks(drv, failing)).toBe(0);
+    expect(count(h, 'r2_cleanup_tasks')).toBe(1);
+    const idB = (h.sqlite.query('SELECT id FROM user WHERE email = ?').get('b@example.com') as { id: string }).id;
+    expect(await sweepCleanupTasks(drv, memoryStore(h.objects))).toBe(1);
+    expect(await sweepCleanupTasks(drv, memoryStore(h.objects))).toBe(0); // 冪等
     expect(userObjects(h, idA)).toEqual([]);
-    expect(count(h, 'image_uploads', `user_id = '${idA}'`)).toBe(0);
+    expect(userObjects(h, idB).length).toBe(1);
+    expect(count(h, 'r2_cleanup_tasks')).toBe(0);
+  });
+
+  test('複数の失効アップロードが削除完了後に再開しても、すべて回収される', async () => {
+    const { h, a, b, idA, idB } = await setup();
+    const g = gate();
+    h.faults.beforePut = g.promise;
+    const pendings = [11, 12, 13].map((n) => upload(h, a, `m${n}.png`, png(n)));
+    const other = upload(h, b, 'bm.png', png(20)); // 他アカウントも同時に書き込み中
+    await tick();
+    h.sqlite.run('UPDATE image_uploads SET started_at = 0'); // すべて失効扱い
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+
+    const orig = h.objects.delete.bind(h.objects);
+    h.objects.delete = () => {
+      throw new Error('R2 unavailable');
+    };
+    g.open();
+    const results = await Promise.all(pendings);
+    expect(results.map((r) => r.status)).toEqual([401, 401, 401]);
+    expect((await other).status).toBe(200); // 他アカウントは影響を受けない
+    h.objects.delete = orig;
+    h.faults.beforePut = null;
+    expect(userObjects(h, idA).length).toBe(3);
+    expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(3);
+
+    // Workers 再起動相当: 新しいドライバ・ストアで掃除しても同じ結果になる
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(3);
+    expect(userObjects(h, idA)).toEqual([]);
+    expect(userObjects(h, idB).length).toBe(2);
+    expect(count(h, 'r2_cleanup_tasks')).toBe(0);
   });
 
   test('他アカウントの画像アップロードは影響を受けない', async () => {

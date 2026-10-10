@@ -89,13 +89,13 @@ export async function putImage(
     ]);
   } catch (e) {
     // 削除中ならユーザー行の削除による外部キー違反などもここに来る。取り消したうえで 401 を返す
-    if (await rollbackIfDeleting(driver, store, userId, key, uploadId)) {
+    if (await rollbackIfDeleting(driver, store, userId, key, uploadId, now)) {
       throw new ImageError(401, 'account_deleted');
     }
     throw e;
   }
   // 書き込み後に削除依頼が出ていたら、この書き込みを自分で取り消す(削除側の掃除より後に書いた分の回収)
-  if (await rollbackIfDeleting(driver, store, userId, key, uploadId)) {
+  if (await rollbackIfDeleting(driver, store, userId, key, uploadId, now)) {
     throw new ImageError(401, 'account_deleted');
   }
   await driver.batch([{ sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] }]);
@@ -104,8 +104,12 @@ export async function putImage(
 
 /**
  * 削除依頼が出ていれば、書き込んだオブジェクトを取り消して true を返す(出ていなければ何もせず false)。
- * 取り消しに成功した場合だけアップロード記録を消す。失敗したら記録を残し、
- * 失効後に定期掃除が R2 を再掃除する(それまで削除は完了にならない)。
+ *
+ * - 削除依頼の確認に失敗したら握りつぶさず例外にする(アップロード記録は残る)。
+ * - 取り消す前に、永続的な掃除タスク(r2_cleanup_tasks)を記録する。アカウント削除が完了して
+ *   image_uploads が消えた後でも、定期掃除がこのオブジェクトを特定して消せる。
+ * - R2 の削除に失敗したらタスクを残し、ログを出して true を返す(呼び出し側は 401)。再試行は定期掃除が冪等に行う。
+ * - 記録にも削除にも失敗した場合だけ例外にする(アップロード記録は残り、500 になる)。
  */
 async function rollbackIfDeleting(
   driver: SyncDriver,
@@ -113,20 +117,32 @@ async function rollbackIfDeleting(
   userId: string,
   key: string,
   uploadId: string,
+  now: number,
 ): Promise<boolean> {
+  if (!(await isDeletionRequested(driver, userId))) return false;
+  let recorded = false;
   try {
-    if (!(await isDeletionRequested(driver, userId))) return false;
-  } catch {
-    return false;
+    await driver.batch([
+      {
+        sql: 'INSERT OR IGNORE INTO r2_cleanup_tasks (r2_key, user_id, created_at) VALUES (?, ?, ?)',
+        params: [key, userId, now],
+      },
+    ]);
+    recorded = true;
+  } catch (e) {
+    console.error('[images] 掃除タスクの記録に失敗しました', e instanceof Error ? e.message : 'unknown');
   }
   try {
     await store.delete(key);
     await driver.batch([
       { sql: 'DELETE FROM image_objects WHERE user_id = ? AND r2_key = ?', params: [userId, key] },
+      { sql: 'DELETE FROM r2_cleanup_tasks WHERE r2_key = ?', params: [key] },
       { sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] },
     ]);
-  } catch {
-    // 記録を残す
+  } catch (e) {
+    console.error('[images] 取り消しに失敗しました。定期掃除で再試行します', e instanceof Error ? e.message : 'unknown');
+    // 追跡できない場合は握りつぶさない(アップロード記録は残したまま 500 にする)
+    if (!recorded) throw e;
   }
   return true;
 }
