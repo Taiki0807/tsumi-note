@@ -58,7 +58,8 @@ const pressLast = (text: string) => fireEvent.press(screen.getAllByText(text).at
 describe('AccountCardView', () => {
   it('メールアドレス・ログイン方法・同期状態・最終同期日時を表示する', async () => {
     await renderCard({ providers: ['credential', 'google'] });
-    expect(screen.getByText('a@example.com')).toBeTruthy();
+    // Figma 17: プロフィールとメールアドレス行の2か所に表示する
+    expect(screen.getAllByText('a@example.com')).toHaveLength(2);
     expect(screen.getByText(/ログイン方法: メールアドレス、Google/)).toBeTruthy();
     expect(screen.getByText('同期済み')).toBeTruthy();
     expect(screen.getByText(/最終同期: 10\/10 09:05/)).toBeTruthy();

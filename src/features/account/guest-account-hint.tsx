@@ -1,8 +1,6 @@
-import { router } from 'expo-router';
 import { Text, View } from 'react-native';
 
 import { fontFamily, typography, useTheme } from '@/design';
-import { TextLink } from '@/features/auth/auth-ui';
 
 /** ゲスト利用中の説明。ログインしなくても全機能を使え、ログイン時の引き継ぎは選べることを伝える(未デザイン) */
 export function GuestAccountHint({ configured }: { configured: boolean }) {
@@ -18,14 +16,6 @@ export function GuestAccountHint({ configured }: { configured: boolean }) {
           ? 'ログインするときは、この端末の記録を引き継ぐかどうかを選べます(ゲストの記録は削除されません)。'
           : ''}
       </Text>
-      {configured ? (
-        <TextLink
-          size="sm"
-          prefix="アカウントをお持ちの方は"
-          label="ログイン"
-          onPress={() => router.push('/account/login')}
-        />
-      ) : null}
     </View>
   );
 }

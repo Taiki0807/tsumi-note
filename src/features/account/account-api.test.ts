@@ -13,7 +13,10 @@ describe('アカウントAPIクライアント', () => {
       json(200, { id: 'u1', email: 'a@example.com', providers: ['apple'] }),
     );
     const r = await api(fetchImpl as never).fetchInfo();
-    expect(r).toEqual({ ok: true, data: { email: 'a@example.com', providers: ['apple'], deletionPending: false } });
+    expect(r).toEqual({
+      ok: true,
+      data: { email: 'a@example.com', providers: ['apple'], deletionPending: false },
+    });
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('https://api.test/v1/account');
     expect((init.headers as Record<string, string>).cookie).toBe('session=abc');

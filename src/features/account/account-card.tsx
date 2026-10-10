@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { BottomSheet, Button } from '@/components/form-ui';
+import { Icon } from '@/components/icons';
 import { fontFamily, radius, typography, useTheme } from '@/design';
 import { Notice, PasswordInput } from '@/features/auth/auth-ui';
 import { canSyncNow, describeSync, syncBadge, type SyncTone } from '@/sync/describe';
@@ -33,8 +34,7 @@ type Props = {
 type Sheet = 'none' | 'logout' | 'delete';
 
 /**
- * ログイン中のマイページのアカウントカード。Figma 16(マイページ・登録済み)は取得できていないため、
- * 既存のデザイントークンとコンポーネントで構成した仮実装(Figma準拠は未確認)。
+ * アカウント画面(Figma 17)の本体。削除の確認シート(Figma 18)は既存の BottomSheet / Button で構成。
  */
 export function AccountCardView({
   email,
@@ -102,41 +102,118 @@ export function AccountCardView({
     </Text>
   );
 
-  return (
-    <View
-      style={{
-        gap: 12,
-        padding: 18,
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: colors.divider,
-        backgroundColor: colors.surface,
-      }}
-    >
-      <Text style={{ fontFamily: fontFamily.extraBold, ...typography.caption, color: colors.textSecondary }}>
-        アカウント
-      </Text>
-      <Text
-        numberOfLines={1}
-        accessibilityLabel={`メールアドレス ${email}`}
-        style={{ fontFamily: fontFamily.extraBold, ...typography.body, color: colors.textPrimary }}
-      >
-        {email}
-      </Text>
-      <Text style={{ fontFamily: fontFamily.bold, ...typography.label, color: colors.textSecondary }}>
-        ログイン方法: {providers === null ? '確認中…' : providers.map(providerLabel).join('、') || '不明'}
-      </Text>
+  const initial = (email.trim()[0] ?? '?').toUpperCase();
+  const methods = providers === null ? '確認中…' : providers.map(providerLabel).join('、') || '不明';
+  const rowLabel = { fontFamily: fontFamily.bold, fontSize: 14, lineHeight: 22, color: colors.textSecondary };
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: toneColor[badge.tone] }} />
-        <Text
-          accessibilityRole="text"
-          style={{ fontFamily: fontFamily.extraBold, ...typography.body, color: toneColor[badge.tone] }}
+  return (
+    <View style={{ gap: 16 }}>
+      {/* Figma 17 Profile: 64pt avatar (radius 32, 26 ExtraBold), 14pt gap */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+        <View
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 32,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: colors.primarySoft,
+          }}
         >
-          {badge.label}
+          <Text
+            style={{ fontFamily: fontFamily.extraBold, fontSize: 26, lineHeight: 28, color: colors.primary }}
+          >
+            {initial}
+          </Text>
+        </View>
+        <Text
+          numberOfLines={1}
+          accessibilityLabel={`メールアドレス ${email}`}
+          style={{
+            flex: 1,
+            fontFamily: fontFamily.extraBold,
+            fontSize: 20,
+            lineHeight: 28,
+            color: colors.textPrimary,
+          }}
+        >
+          {email}
         </Text>
       </View>
-      <Notice tone={badge.tone === 'error' ? 'error' : 'info'}>{describeSync(sync)}</Notice>
+
+      {/* Figma 17 Card: radius 16, padding 16/4, rows with 12pt vertical padding and a top divider */}
+      <View
+        style={{
+          paddingHorizontal: 16,
+          paddingVertical: 4,
+          borderRadius: radius.lg,
+          borderWidth: 1,
+          borderColor: colors.divider,
+          backgroundColor: colors.surface,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 }}>
+          <Text style={[rowLabel, { flex: 1 }]}>メールアドレス</Text>
+          <Text
+            numberOfLines={1}
+            style={{
+              flexShrink: 1,
+              fontFamily: fontFamily.extraBold,
+              ...typography.body,
+              color: colors.textPrimary,
+            }}
+          >
+            {email}
+          </Text>
+        </View>
+        <View
+          style={{
+            paddingVertical: 12,
+            borderTopWidth: 1,
+            borderTopColor: colors.divider,
+          }}
+        >
+          <Text style={rowLabel}>ログイン方法: {methods}</Text>
+        </View>
+      </View>
+
+      {/* Figma 17 Devices card: radius 16, padding 16/14/16/6。端末一覧は仕様外のため、この端末の同期状態を示す */}
+      <View
+        style={{
+          gap: 4,
+          paddingLeft: 16,
+          paddingRight: 16,
+          paddingTop: 14,
+          paddingBottom: 6,
+          borderRadius: radius.lg,
+          borderWidth: 1,
+          borderColor: colors.divider,
+          backgroundColor: colors.surface,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text
+            style={{
+              flex: 1,
+              fontFamily: fontFamily.extraBold,
+              ...typography.caption,
+              color: colors.textSecondary,
+            }}
+          >
+            同期の状態
+          </Text>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: toneColor[badge.tone] }} />
+          <Text
+            accessibilityRole="text"
+            style={{ fontFamily: fontFamily.extraBold, ...typography.caption, color: toneColor[badge.tone] }}
+          >
+            {badge.label}
+          </Text>
+        </View>
+        <View style={{ paddingVertical: 10 }}>
+          <Notice tone={badge.tone === 'error' ? 'error' : 'info'}>{describeSync(sync)}</Notice>
+        </View>
+      </View>
       <Button
         variant="secondary"
         label={sync.status === 'syncing' ? '同期中…' : '今すぐ同期'}
@@ -144,14 +221,28 @@ export function AccountCardView({
         onPress={sync.syncNow}
       />
       <Button variant="secondary" label="ログアウト" onPress={() => setSheet('logout')} />
-      {deletionPending ? (
-        <Notice tone="error">アカウントの削除が完了していません。削除を再試行してください。</Notice>
-      ) : null}
-      <Button
-        variant="danger"
-        label={deletionPending ? 'アカウント削除を再試行' : 'アカウントを削除'}
-        onPress={() => setSheet('delete')}
-      />
+
+      {/* Figma 17 Danger zone: trash icon + 14 ExtraBold label (44pt), 12 Bold caption below */}
+      <View style={{ alignItems: 'center', gap: 4, paddingTop: 16 }}>
+        {deletionPending ? (
+          <Notice tone="error">アカウントの削除が完了していません。削除を再試行してください。</Notice>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setSheet('delete')}
+          style={{ height: 44, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16 }}
+        >
+          <Icon name="trash" size={18} color={colors.danger} strokeWidth={2} />
+          <Text
+            style={{ fontFamily: fontFamily.extraBold, fontSize: 14, lineHeight: 22, color: colors.danger }}
+          >
+            {deletionPending ? 'アカウント削除を再試行' : 'アカウントを削除'}
+          </Text>
+        </Pressable>
+        <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
+          すべての端末から記録が消え、元に戻せません
+        </Text>
+      </View>
 
       <BottomSheet visible={sheet === 'logout'} onClose={close} gap={16}>
         {heading('ログアウトしますか？')}
@@ -187,7 +278,8 @@ export function AccountCardView({
         {providers === null ? (
           <>
             <Notice tone="info">
-              ログイン方法を確認できていません。パスワードでログインしている場合は入力してください(Apple / Google のみの場合は空欄のままで構いません)。
+              ログイン方法を確認できていません。パスワードでログインしている場合は入力してください(Apple /
+              Google のみの場合は空欄のままで構いません)。
             </Notice>
             <PasswordInput
               label="現在のパスワード"
@@ -219,7 +311,9 @@ export function AccountCardView({
             disabled={busy || (needsPassword && password.length === 0)}
             // ログイン方法が不明なときも妨げない。必要なら入力されたパスワードを送り、判断(本人確認)はサーバーが行う
             onPress={() =>
-              void run(() => onDelete(needsPassword || providers === null ? password || undefined : undefined))
+              void run(() =>
+                onDelete(needsPassword || providers === null ? password || undefined : undefined),
+              )
             }
           />
         </View>
