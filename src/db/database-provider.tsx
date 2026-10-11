@@ -19,7 +19,7 @@ import { databaseNameForOwner, type OwnerId } from './ownership';
 import { ownerHintStorage } from './owner-hint-storage';
 import {
   consumeDeviceWipe,
-  setWipeNotice,
+  publishWipeResult,
   WIPE_DONE_MESSAGE,
   WIPE_FAILED_MESSAGE,
 } from './device-wipe';
@@ -112,9 +112,8 @@ function OwnerDatabase({
   useEffect(() => {
     if (!success || owner !== null || !consumeDeviceWipe()) return;
     wipeDeviceNative(db)
-      .then(() => setWipeNotice({ tone: 'success', message: WIPE_DONE_MESSAGE }))
-      .catch(() => setWipeNotice({ tone: 'error', message: WIPE_FAILED_MESSAGE }))
-      .finally(reload);
+      .then(() => publishWipeResult({ tone: 'success', message: WIPE_DONE_MESSAGE }, reload))
+      .catch(() => publishWipeResult({ tone: 'error', message: WIPE_FAILED_MESSAGE }, reload));
   }, [success, owner, db, reload]);
 
   if (error) return <>{renderError?.(error) ?? null}</>;

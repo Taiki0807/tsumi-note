@@ -91,5 +91,14 @@ export function takeWipeNotice(): WipeNotice | null {
   return value;
 }
 
+/**
+ * 結果を保存してから画面を作り直す。reload() で通知を出す画面がアンマウントされるため、
+ * 結果は必ず作り直しの前にワンショット通知へ保存する(順序を入れ替えない)。
+ */
+export function publishWipeResult(value: WipeNotice, reload: () => void): void {
+  setWipeNotice(value);
+  reload();
+}
+
 export const WIPE_DONE_MESSAGE = '端末内のデータを削除しました';
 export const WIPE_FAILED_MESSAGE = '端末内のデータを削除できませんでした。もう一度お試しください。';

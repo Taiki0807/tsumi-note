@@ -4,6 +4,7 @@ import {
   armDeviceWipe,
   consumeDeviceWipe,
   disarmDeviceWipe,
+  publishWipeResult,
   setWipeNotice,
   takeWipeNotice,
   wipeDevice,
@@ -105,6 +106,30 @@ describe('結果の通知', () => {
   it('1回だけ受け取れる', () => {
     setWipeNotice({ tone: 'success', message: 'ok' });
     expect(takeWipeNotice()).toEqual({ tone: 'success', message: 'ok' });
+    expect(takeWipeNotice()).toBeNull();
+  });
+});
+
+describe('publishWipeResult(reload による再マウントを越える通知)', () => {
+  afterEach(() => void takeWipeNotice());
+
+  it('reload の時点で通知は保存済みで、再マウント後に1回だけ受け取れる(重複しない)', () => {
+    let atReload: ReturnType<typeof takeWipeNotice> = null;
+    // 再マウント = reload 内で新しい画面が初期化時に takeWipeNotice する
+    publishWipeResult({ tone: 'success', message: 'ok' }, () => {
+      atReload = takeWipeNotice();
+    });
+    expect(atReload).toEqual({ tone: 'success', message: 'ok' });
+    expect(takeWipeNotice()).toBeNull();
+  });
+
+  it('失敗の結果は error として渡り、成功通知は残らない', () => {
+    publishWipeResult({ tone: 'error', message: 'ng' }, () => undefined);
+    expect(takeWipeNotice()).toEqual({ tone: 'error', message: 'ng' });
+    expect(takeWipeNotice()).toBeNull();
+  });
+
+  it('保存していなければ(アプリ再起動後など)何も出ない', () => {
     expect(takeWipeNotice()).toBeNull();
   });
 });

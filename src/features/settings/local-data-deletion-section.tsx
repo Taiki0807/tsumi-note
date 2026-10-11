@@ -5,7 +5,7 @@ import { BottomSheet, Button } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, radius, typography, useTheme } from '@/design';
 import { useDatabaseContext } from '@/db/database-provider';
-import { armDeviceWipe, disarmDeviceWipe, takeWipeNotice, WIPE_DONE_MESSAGE, type WipeNotice } from '@/db/device-wipe';
+import { armDeviceWipe, disarmDeviceWipe, publishWipeResult, takeWipeNotice, WIPE_DONE_MESSAGE, type WipeNotice } from '@/db/device-wipe';
 import { wipeDeviceNative } from '@/db/device-wipe-native';
 import { useAuth } from '@/features/auth/auth-context';
 import { Notice } from '@/features/auth/auth-ui';
@@ -62,8 +62,8 @@ export function LocalDataDeletionSection() {
       setOpen(false);
       // ログイン中: 削除はログアウト後(ゲストDBへ切り替わった後)に DatabaseProvider が1回だけ実行し、結果を通知する
       if (!outcome.deferred) {
-        setResult({ tone: 'success', message: WIPE_DONE_MESSAGE });
-        reload();
+        // reload() でこの画面はアンマウントされるため、結果は作り直しの前にワンショット通知へ保存する
+        publishWipeResult({ tone: 'success', message: WIPE_DONE_MESSAGE }, reload);
       }
     } finally {
       inFlight.current = false;
