@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppIcon } from '@/components/app-icon';
 import { Icon, type IconName } from '@/components/icons';
 import { fontFamily, layout, radius, typography, useTheme } from '@/design';
+import { openLegalUrl, PRIVACY_URL, TERMS_URL } from '@/features/settings/legal-links';
 
 import { goHome, Notice, ProviderButton, TextLink } from './auth-ui';
 import { useSocialSignIn } from './use-social-sign-in';
@@ -184,7 +185,23 @@ export function CreateAccountScreen() {
             color: colors.textSecondary,
           }}
         >
-          続けると、利用規約とプライバシーポリシーに同意したことになります。
+          続けると、
+          <Text
+            accessibilityRole="link"
+            onPress={() => openLegalUrl(TERMS_URL)}
+            style={{ fontFamily: fontFamily.extraBold, color: colors.primary }}
+          >
+            利用規約
+          </Text>
+          と
+          <Text
+            accessibilityRole="link"
+            onPress={() => openLegalUrl(PRIVACY_URL)}
+            style={{ fontFamily: fontFamily.extraBold, color: colors.primary }}
+          >
+            プライバシーポリシー
+          </Text>
+          に同意したことになります。
         </Text>
         <TextLink
           prefix="アカウントをお持ちの方は"
