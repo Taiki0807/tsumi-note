@@ -58,19 +58,26 @@ export async function putImage(
   const existing = await findRow(driver, userId, input.fileName);
   if (existing && existing.sha256 !== sha256) throw new ImageError(409, 'file_name_conflict');
 
-  // 書き込みの前に「進行中のアップロード」を記録する。削除依頼が出ていれば作れない(1文で原子的)。
-  // アカウント削除はこの記録が残る間は完了しないので、削除後のR2書き込みが残ることがない。
+  // 書き込みの前に「進行中のアップロード」と「掃除タスク(書き込み先キー)」を1バッチで原子的に記録する。
+  // どちらも削除依頼が出ていれば作れない。タスクはR2へ書く前に永続化されるので、書き込み後にD1が読めなくても、
+  // アカウント削除の完了後に遅れて書き込まれても、定期掃除(sweepCleanupTasks)が書き込み先を特定して消せる。
+  // 記録できなければ(D1障害など)R2へは何も書かない。
   const uploadId = crypto.randomUUID();
+  const key = keyFor(userId, sha256);
   const [started] = await driver.batch([
     {
       sql: `INSERT INTO image_uploads (id, user_id, started_at)
             SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM account_deletions WHERE user_id = ?)`,
       params: [uploadId, userId, now, userId],
     },
+    {
+      sql: `INSERT INTO r2_cleanup_tasks (id, r2_key, user_id, created_at)
+            SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM account_deletions WHERE user_id = ?)`,
+      params: [uploadId, key, userId, now, userId],
+    },
   ]);
   if (started !== 1) throw new ImageError(401, 'account_deleted');
 
-  const key = keyFor(userId, sha256);
   let present = false;
   try {
     // 同じ内容が既にあれば本体は再アップロードしない(重複排除)。念のためR2に実在するか確認する
@@ -89,27 +96,30 @@ export async function putImage(
     ]);
   } catch (e) {
     // 削除中ならユーザー行の削除による外部キー違反などもここに来る。取り消したうえで 401 を返す
-    if (await rollbackIfDeleting(driver, store, userId, key, uploadId, now)) {
+    if (await rollbackIfDeleting(driver, store, userId, key, uploadId)) {
       throw new ImageError(401, 'account_deleted');
     }
     throw e;
   }
   // 書き込み後に削除依頼が出ていたら、この書き込みを自分で取り消す(削除側の掃除より後に書いた分の回収)
-  if (await rollbackIfDeleting(driver, store, userId, key, uploadId, now)) {
+  if (await rollbackIfDeleting(driver, store, userId, key, uploadId)) {
     throw new ImageError(401, 'account_deleted');
   }
-  await driver.batch([{ sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] }]);
+  // 正常終了: 自分の記録だけを消す(同じキーの別アップロードのタスクには触れない)
+  await driver.batch([
+    { sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] },
+    { sql: 'DELETE FROM r2_cleanup_tasks WHERE id = ?', params: [uploadId] },
+  ]);
   return { sha256, size: input.bytes.length, deduplicated: present };
 }
 
 /**
  * 削除依頼が出ていれば、書き込んだオブジェクトを取り消して true を返す(出ていなければ何もせず false)。
  *
- * - 削除依頼の確認に失敗したら握りつぶさず例外にする(アップロード記録は残る)。
- * - 取り消す前に、永続的な掃除タスク(r2_cleanup_tasks)を記録する。アカウント削除が完了して
- *   image_uploads が消えた後でも、定期掃除がこのオブジェクトを特定して消せる。
+ * - 掃除タスクは書き込み前に記録済み。ここでは新たに記録しないので、D1の読み取りが失敗しても追跡情報は失われない。
+ *   削除依頼の確認に失敗したら握りつぶさず例外にする(アップロード記録とタスクは残り、500 になる)。
+ *   後でそのユーザーの削除が行われれば、定期掃除がタスクから R2 のキーを回収する。
  * - R2 の削除に失敗したらタスクを残し、ログを出して true を返す(呼び出し側は 401)。再試行は定期掃除が冪等に行う。
- * - 記録にも削除にも失敗した場合だけ例外にする(アップロード記録は残り、500 になる)。
  */
 async function rollbackIfDeleting(
   driver: SyncDriver,
@@ -117,32 +127,23 @@ async function rollbackIfDeleting(
   userId: string,
   key: string,
   uploadId: string,
-  now: number,
 ): Promise<boolean> {
   if (!(await isDeletionRequested(driver, userId))) return false;
-  let recorded = false;
-  try {
-    await driver.batch([
-      {
-        sql: 'INSERT OR IGNORE INTO r2_cleanup_tasks (r2_key, user_id, created_at) VALUES (?, ?, ?)',
-        params: [key, userId, now],
-      },
-    ]);
-    recorded = true;
-  } catch (e) {
-    console.error('[images] 掃除タスクの記録に失敗しました', e instanceof Error ? e.message : 'unknown');
-  }
   try {
     await store.delete(key);
+  } catch (e) {
+    console.error('[images] 取り消しに失敗しました。定期掃除で再試行します', e instanceof Error ? e.message : 'unknown');
+    return true;
+  }
+  try {
     await driver.batch([
       { sql: 'DELETE FROM image_objects WHERE user_id = ? AND r2_key = ?', params: [userId, key] },
-      { sql: 'DELETE FROM r2_cleanup_tasks WHERE r2_key = ?', params: [key] },
+      { sql: 'DELETE FROM r2_cleanup_tasks WHERE id = ?', params: [uploadId] },
       { sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] },
     ]);
   } catch (e) {
-    console.error('[images] 取り消しに失敗しました。定期掃除で再試行します', e instanceof Error ? e.message : 'unknown');
-    // 追跡できない場合は握りつぶさない(アップロード記録は残したまま 500 にする)
-    if (!recorded) throw e;
+    // R2 は消えている。残った記録は定期掃除が冪等に片付ける
+    console.error('[images] 取り消し後の記録削除に失敗しました', e instanceof Error ? e.message : 'unknown');
   }
   return true;
 }

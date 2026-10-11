@@ -3,12 +3,12 @@ import { Pressable, Text, View } from 'react-native';
 
 import { Icon } from '@/components/icons';
 import { fontFamily, radius, typography, useTheme } from '@/design';
-import { syncBadge, type SyncTone } from '@/sync/describe';
+import { formatLastSynced, syncBadge, type SyncTone } from '@/sync/describe';
 import type { SyncStatus } from '@/sync/controller';
 
 type Props = {
   email: string;
-  sync: { status: SyncStatus; pending: number; conflicts: number };
+  sync: { status: SyncStatus; lastSyncedAt: number | null; pending: number; conflicts: number };
 };
 
 /**
@@ -88,6 +88,19 @@ export function AccountSummary({ email, sync }: Props) {
           style={{ fontFamily: fontFamily.extraBold, ...typography.caption, color: tone[badge.tone].fg }}
         >
           {badge.label}
+        </Text>
+        <Text
+          testID="account-last-synced"
+          numberOfLines={1}
+          style={{
+            flex: 1,
+            textAlign: 'right',
+            fontFamily: fontFamily.bold,
+            ...typography.caption,
+            color: colors.textSecondary,
+          }}
+        >
+          {formatLastSynced(sync.lastSyncedAt)}
         </Text>
       </View>
     </Pressable>

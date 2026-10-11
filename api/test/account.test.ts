@@ -331,6 +331,80 @@ describe('アカウント削除と画像アップロードの競合', () => {
     expect(count(h, 'r2_cleanup_tasks')).toBe(0);
   });
 
+  test('削除完了後の遅延PUTでD1の削除依頼確認が失敗しても、書き込み先は追跡され復旧後に回収される', async () => {
+    const { h, a, idA, idB } = await setup();
+    const g = gate();
+    h.faults.beforePut = g.promise;
+    const pendings = [31, 32].map((n) => upload(h, a, `d${n}.png`, png(n))); // 並行アップロード
+    await tick();
+    // 書き込み前に、書き込み先が永続タスクとして記録されている
+    expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(2);
+    h.sqlite.run('UPDATE image_uploads SET started_at = 0'); // 失効扱い
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+    expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(2); // 削除完了後もタスクは残る
+
+    h.faults.readDeletion = true; // D1の読み取り障害
+    g.open();
+    const results = await Promise.all(pendings);
+    h.faults.readDeletion = false;
+    h.faults.beforePut = null;
+    expect(results.map((r) => r.status)).toEqual([500, 500]); // 握りつぶさず失敗を返す
+    expect(userObjects(h, idA).length).toBe(2); // R2には書かれている
+    expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(2); // 追跡情報は失われていない
+
+    // D1復旧後の定期掃除で回収される。他アカウントの画像は残る。再実行しても結果は同じ
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(2);
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(0);
+    expect(userObjects(h, idA)).toEqual([]);
+    expect(userObjects(h, idB).length).toBe(1);
+    expect(count(h, 'r2_cleanup_tasks')).toBe(0);
+  });
+
+  test('掃除タスクを記録できない(D1障害)ときはR2へ何も書かない', async () => {
+    const { h, a, idA } = await setup();
+    h.faults.failBatchOn = 'INSERT INTO r2_cleanup_tasks';
+    const res = await upload(h, a, 'nowrite.png', png(40));
+    h.faults.failBatchOn = null;
+    expect(res.status).toBe(500);
+    expect(userObjects(h, idA).length).toBe(1); // setup の a1.png のみ
+    expect(count(h, 'image_uploads', `user_id = '${idA}'`)).toBe(0);
+  });
+
+  test('R2削除失敗とD1の記録削除失敗が重なっても、タスクが残り定期掃除で回収される', async () => {
+    const { h, a, idA } = await setup();
+    const g = gate();
+    h.faults.beforePut = g.promise;
+    const pending = upload(h, a, 'both.png', png(41));
+    await tick();
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(500); // アップロード中は完了しない
+    const orig = h.objects.delete.bind(h.objects);
+    h.objects.delete = () => {
+      throw new Error('R2 unavailable');
+    };
+    g.open();
+    expect((await pending).status).toBe(401);
+    h.objects.delete = orig;
+    h.faults.beforePut = null;
+    expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(1);
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(1);
+    expect(count(h, 'r2_cleanup_tasks')).toBe(0);
+  });
+
+  test('正常に完了したアップロードの掃除タスクは残らない。削除依頼の無い古いタスクは行だけ捨てる', async () => {
+    const { h, idA, idB } = await setup();
+    expect(count(h, 'r2_cleanup_tasks')).toBe(0);
+    h.sqlite.run('INSERT INTO r2_cleanup_tasks (id, r2_key, user_id, created_at) VALUES (?, ?, ?, ?)', [
+      'stale',
+      `u/${idB}/x`,
+      idB,
+      1,
+    ]);
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), 10 * 24 * 3600 * 1000)).toBe(0);
+    expect(count(h, 'r2_cleanup_tasks')).toBe(0);
+    expect(userObjects(h, idA).length).toBe(1);
+    expect(userObjects(h, idB).length).toBe(1);
+  });
+
   test('複数の失効アップロードが削除完了後に再開しても、すべて回収される', async () => {
     const { h, a, b, idA, idB } = await setup();
     const g = gate();

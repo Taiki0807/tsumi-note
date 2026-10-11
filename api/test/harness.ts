@@ -43,10 +43,10 @@ export function createHarness(
   });
   const objects = new Map<string, Uint8Array>();
   /** R2 の障害を再現する(アカウント削除の途中失敗のテスト用) */
-  const faults: Faults = { deletePrefix: false, beforePut: null };
+  const faults: Faults = { deletePrefix: false, beforePut: null, readDeletion: false, failBatchOn: null };
   const app = createApp(
     () => auth,
-    () => bunDriver(sqlite),
+    () => faultyDriver(bunDriver(sqlite), faults),
     () => faultyStore(memoryStore(objects), faults),
   );
 
@@ -92,7 +92,30 @@ export function createHarness(
   return { sqlite, sent, request, raw, objects, lastLink, faults, app, baseURL: opts.baseURL ?? BASE };
 }
 
-type Faults = { deletePrefix: boolean; beforePut: Promise<void> | null };
+type Faults = {
+  deletePrefix: boolean;
+  beforePut: Promise<void> | null;
+  /** true の間、削除依頼の確認(account_deletions の読み取り)がD1障害で失敗する */
+  readDeletion: boolean;
+  /** 設定した文字列を含むSQLを実行する batch を失敗させる */
+  failBatchOn: string | null;
+};
+
+function faultyDriver(inner: SyncDriver, faults: Faults): SyncDriver {
+  return {
+    async all<T>(s: SqlStatement): Promise<T[]> {
+      if (faults.readDeletion && s.sql.includes('SELECT user_id FROM account_deletions')) {
+        throw new Error('D1 unavailable');
+      }
+      return inner.all<T>(s);
+    },
+    async batch(statements: SqlStatement[]): Promise<number[]> {
+      const target = faults.failBatchOn;
+      if (target && statements.some((s) => s.sql.includes(target))) throw new Error('D1 unavailable');
+      return inner.batch(statements);
+    },
+  };
+}
 
 function faultyStore(inner: ObjectStore, faults: Faults): ObjectStore {
   return {
