@@ -6,5 +6,10 @@ CREATE TABLE `account_deletions` (
 	`user_id` text PRIMARY KEY NOT NULL,
 	`requested_at` integer NOT NULL,
 	`completed_at` integer,
-	`last_scanned_at` integer
+	`last_scanned_at` integer,
+	`next_scan_at` integer NOT NULL DEFAULT 0,
+	`scan_failures` integer NOT NULL DEFAULT 0
 );
+--> statement-breakpoint
+-- 再走査は next_scan_at の昇順に取得する。last_scanned_at は「最後に成功した走査」、next_scan_at は「次に試みる時刻」で意味が異なる
+CREATE INDEX `account_deletions_next_scan_idx` ON `account_deletions` (`next_scan_at`);

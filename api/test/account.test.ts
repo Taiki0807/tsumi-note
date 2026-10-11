@@ -553,7 +553,10 @@ describe('アカウント削除と画像アップロードの競合', () => {
       const failing = { ...memoryStore(h.objects), deletePrefix: async () => { throw new Error('R2 unavailable'); } };
       await sweepDeletions(drv, failing, t0 + 400 * DAY);
       expect(userObjects(h, idA).length).toBe(1);
+      // 失敗は指数バックオフ(上限1日+ジッター)後に再試行される。直後は対象外
       await sweepDeletions(drv, memoryStore(h.objects), t0 + 400 * DAY + 1);
+      expect(userObjects(h, idA).length).toBe(1);
+      await sweepDeletions(drv, memoryStore(h.objects), t0 + 402 * DAY);
       expect(userObjects(h, idA)).toEqual([]);
     });
 
@@ -725,5 +728,177 @@ describe('削除が途中で止まったアカウントの再試行', () => {
     const { h, a } = await setup();
     const body = (await (await h.request('/v1/account', { headers: { cookie: a } })).json()) as any;
     expect(body.deletionPending).toBe(false);
+  });
+});
+
+describe('削除済みアカウントの再走査スケジューリング(飢餓状態の防止)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const T0 = 1_000_000_000_000;
+  const mid = () => 0.5; // ジッター中央値(決定的)
+
+  /** user 行の無い削除完了済みアカウントを n 件用意し、各々に R2 の残骸を1つ置く */
+  function seed(h: H, n: number, prefix = 'g') {
+    const ids: string[] = [];
+    h.sqlite.run('BEGIN');
+    for (let i = 0; i < n; i++) {
+      const id = `${prefix}${String(i).padStart(4, '0')}`;
+      ids.push(id);
+      // i が小さいほど古い。next_scan_at の既定値 0 で全件が対象
+      h.sqlite.run('INSERT INTO account_deletions (user_id, requested_at, completed_at) VALUES (?, ?, ?)', [
+        id,
+        T0 + i,
+        T0 + i,
+      ]);
+      h.objects.set(`u/${id}/late`, png(i % 200));
+    }
+    h.sqlite.run('COMMIT');
+    return ids;
+  }
+  const left = (h: H, id: string) => [...h.objects.keys()].filter((k) => k.startsWith(`u/${id}/`)).length;
+  /** 指定IDのプレフィックス走査だけ失敗するR2 */
+  const flaky = (h: H, bad: Set<string>) => ({
+    ...memoryStore(h.objects),
+    deletePrefix: async (prefix: string) => {
+      if ([...bad].some((id) => prefix === `u/${id}/`)) throw new Error('R2 unavailable');
+      await memoryStore(h.objects).deletePrefix(prefix);
+    },
+  });
+
+  test('最古の50件が失敗し続けても、51〜100件目は走査され、失敗分は復旧後に処理される', async () => {
+    const h = createHarness();
+    const ids = seed(h, 100);
+    const bad = new Set(ids.slice(0, 50));
+    const drv = bunDriver(h.sqlite);
+    const now = T0 + 10 * DAY;
+    await sweepDeletions(drv, flaky(h, bad), now, mid);
+    await sweepDeletions(drv, flaky(h, bad), now + 1000, mid); // 複数回実行
+    for (const id of ids.slice(50)) expect(left(h, id)).toBe(0);
+    for (const id of ids.slice(0, 50)) expect(left(h, id)).toBe(1); // 失敗分は残っている(放棄しない)
+    // 失敗分は再試行対象として保持される。last_scanned_at(成功時刻)は更新されず、next_scan_at(次回予定)だけ進む
+    const row = h.sqlite
+      .query('SELECT scan_failures, next_scan_at, last_scanned_at FROM account_deletions WHERE user_id = ?')
+      .get(ids[0]!) as any;
+    expect(row.scan_failures).toBe(1);
+    expect(row.next_scan_at).toBeGreaterThan(now);
+    expect(row.last_scanned_at).toBeNull();
+    // 障害復旧後、バックオフが過ぎれば失敗分も処理される
+    await sweepDeletions(drv, memoryStore(h.objects), now + 2 * DAY, mid);
+    for (const id of ids) expect(left(h, id)).toBe(0);
+  });
+
+  test('失敗が続くとバックオフが伸び(上限あり)、放棄されない', async () => {
+    const h = createHarness();
+    const [id] = seed(h, 1);
+    const bad = new Set([id!]);
+    const drv = bunDriver(h.sqlite);
+    let t = T0 + 10 * DAY;
+    const waits: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      await sweepDeletions(drv, flaky(h, bad), t, mid);
+      const r = h.sqlite.query('SELECT next_scan_at FROM account_deletions').get() as any;
+      waits.push(r.next_scan_at - t);
+      t = r.next_scan_at;
+    }
+    expect(waits[1]!).toBeGreaterThan(waits[0]!);
+    expect(Math.max(...waits)).toBeLessThanOrEqual(1.2 * DAY);
+    expect(waits.at(-1)!).toBe(DAY); // 上限(ジッター中央値)
+    await sweepDeletions(drv, memoryStore(h.objects), t, mid);
+    expect(left(h, id!)).toBe(0); // 放棄されず、復旧後に処理される
+  });
+
+  test('1000件以上の削除済みアカウントでも、1回50件ずつ進み全件処理される', async () => {
+    const h = createHarness();
+    const ids = seed(h, 1010);
+    const drv = bunDriver(h.sqlite);
+    const bad = new Set(ids.slice(0, 120)); // 先頭120件は継続的に失敗
+    let t = T0 + 10 * DAY;
+    for (let i = 0; i < 40; i++) await sweepDeletions(drv, flaky(h, bad), (t += 1000), mid);
+    for (const id of ids.slice(120)) expect(left(h, id)).toBe(0);
+    for (const id of ids.slice(0, 120)) expect(left(h, id)).toBe(1);
+    for (let i = 0; i < 4; i++) await sweepDeletions(drv, memoryStore(h.objects), T0 + 20 * DAY + i, mid);
+    for (const id of ids) expect(left(h, id)).toBe(0);
+  });
+
+  test('再試行時刻のD1更新が失敗しても、後続の行は処理され、失敗行は予約により先頭を占有しない', async () => {
+    const h = createHarness();
+    const ids = seed(h, 60);
+    const bad = new Set(ids.slice(0, 50));
+    const base = bunDriver(h.sqlite);
+    // 失敗の記録(scan_failures の更新)だけ失敗するD1
+    const drv = {
+      all: base.all,
+      batch: async (s: Parameters<typeof base.batch>[0]) => {
+        if (s[0]!.sql.includes('scan_failures = scan_failures + 1')) throw new Error('D1 unavailable');
+        return base.batch(s);
+      },
+    };
+    const now = T0 + 10 * DAY;
+    await sweepDeletions(drv, flaky(h, bad), now, mid);
+    await sweepDeletions(drv, flaky(h, bad), now + 1000, mid); // 予約時刻(5分)内: 失敗行は対象外
+    for (const id of ids.slice(50)) expect(left(h, id)).toBe(0);
+    // 予約時刻が過ぎれば、失敗を記録できていなくても再び対象になる(放棄されない)
+    await sweepDeletions(base, memoryStore(h.objects), now + 10 * 60 * 1000, mid);
+    for (const id of ids) expect(left(h, id)).toBe(0);
+  });
+
+  test('予約のD1更新が失敗した行は飛ばし、他の行は処理される', async () => {
+    const h = createHarness();
+    const ids = seed(h, 3);
+    const base = bunDriver(h.sqlite);
+    const drv = {
+      all: base.all,
+      batch: async (s: Parameters<typeof base.batch>[0]) => {
+        if (s[0]!.sql.startsWith('UPDATE account_deletions SET next_scan_at') && s[0]!.params[1] === ids[0])
+          throw new Error('D1 unavailable');
+        return base.batch(s);
+      },
+    };
+    await sweepDeletions(drv, memoryStore(h.objects), T0 + 10 * DAY, mid);
+    expect(left(h, ids[0]!)).toBe(1);
+    expect(left(h, ids[1]!)).toBe(0);
+    expect(left(h, ids[2]!)).toBe(0);
+    await sweepDeletions(base, memoryStore(h.objects), T0 + 10 * DAY + 1, mid);
+    expect(left(h, ids[0]!)).toBe(0);
+  });
+
+  test('Scheduled Workerの重複実行で同じ行を二重に走査しない。途中停止した行は予約の経過後に再開される', async () => {
+    const h = createHarness();
+    const ids = seed(h, 20);
+    let scans = 0;
+    const counting = {
+      ...memoryStore(h.objects),
+      deletePrefix: async (p: string) => {
+        scans++;
+        await memoryStore(h.objects).deletePrefix(p);
+      },
+    };
+    const now = T0 + 10 * DAY;
+    await Promise.all([
+      sweepDeletions(bunDriver(h.sqlite), counting, now, mid),
+      sweepDeletions(bunDriver(h.sqlite), counting, now, mid),
+    ]);
+    expect(scans).toBe(20); // 各行は1回だけ
+    for (const id of ids) expect(left(h, id)).toBe(0);
+    // 予約だけ済んで結果が未記録の行(Workersが止まった)は、予約時刻の経過後に新しいドライバで再び対象になる
+    h.objects.set(`u/${ids[0]}/late2`, png(9));
+    h.sqlite.run('UPDATE account_deletions SET next_scan_at = ? WHERE user_id = ?', [now + 5 * 60 * 1000, ids[0]!]);
+    await sweepDeletions(bunDriver(h.sqlite), memoryStore(h.objects), now + 1000, mid);
+    expect(left(h, ids[0]!)).toBe(1);
+    await sweepDeletions(bunDriver(h.sqlite), memoryStore(h.objects), now + 6 * 60 * 1000, mid);
+    expect(left(h, ids[0]!)).toBe(0);
+  });
+
+  test('新しい削除済みアカウントも走査対象になり、他アカウントの画像は削除されない', async () => {
+    const h = createHarness();
+    const old = seed(h, 50);
+    h.objects.set('u/alive-user/keep', png(1)); // 削除依頼の無いユーザー
+    const drv = bunDriver(h.sqlite);
+    const now = T0 + 10 * DAY;
+    await sweepDeletions(drv, flaky(h, new Set(old)), now, mid);
+    const [fresh] = seed(h, 1, 'n');
+    await sweepDeletions(drv, flaky(h, new Set(old)), now + 1000, mid);
+    expect(left(h, fresh!)).toBe(0);
+    for (const id of old) expect(left(h, id)).toBe(1);
+    expect(h.objects.has('u/alive-user/keep')).toBe(true);
   });
 });

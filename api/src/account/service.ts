@@ -139,58 +139,104 @@ const RESCAN_MID_AGE_MS = 90 * DAY_MS; // 〜90日: 週1回
 const RESCAN_MID_INTERVAL_MS = 7 * DAY_MS;
 const RESCAN_SLOW_INTERVAL_MS = 30 * DAY_MS; // それ以降: 月1回
 
+/** 走査を試みる前に次回予定をこの分だけ先送りして「予約」する(重複実行・途中停止・失敗の記録失敗でも先頭を占有しない) */
+export const SCAN_CLAIM_MS = 5 * 60 * 1000;
+/** 失敗時の指数バックオフ: 基準 × 2^(失敗回数-1)、上限つき(放棄はしない)。±20% のジッター */
+const BACKOFF_BASE_MS = 5 * 60 * 1000;
+const BACKOFF_MAX_MS = DAY_MS;
+const SWEEP_BATCH = 50;
+
+function rescanInterval(requestedAt: number, now: number): number {
+  const age = now - requestedAt;
+  if (age <= RESCAN_FAST_AGE_MS) return 0;
+  return age <= RESCAN_MID_AGE_MS ? RESCAN_MID_INTERVAL_MS : RESCAN_SLOW_INTERVAL_MS;
+}
+
+/** 失敗 n 回目(1始まり)の再試行までの待ち時間 */
+export function backoffMs(failures: number, random: () => number = Math.random): number {
+  const base = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** Math.min(Math.max(failures - 1, 0), 20));
+  return Math.round(base * (0.8 + 0.4 * random()));
+}
+
 /**
  * user 行は消えたが R2 の掃除が済んでいない削除を完了させ、完了済みの削除済みアカウントのプレフィックスを再走査する(定期実行)。
  * 完了した件数を返す。
  *
- * 未完了のR2書き込みがいつまでに終わるかの上限は保証できないため、再走査は「一定期間で打ち切る」ことをしない。
- * 代わりに間隔を段階的に空ける(〜7日は毎回、〜90日は週1回、以降は月1回)。1回の実行は最終走査時刻の古い順に50件までで、
- * 1件あたり list 1回(該当があれば delete も)。運用コストはアカウント数に比例して増えるが、1回あたりは一定に抑えられる。
+ * スケジューリング(最後に成功した時刻 last_scanned_at と、次に試みる時刻 next_scan_at は別):
+ * - 取得は `next_scan_at <= now` の行を `next_scan_at` 昇順に 50 件まで。
+ * - 走査の前に、条件付き UPDATE(`next_scan_at <= now` のとき `now + SCAN_CLAIM_MS` へ)で行を予約する。変更が 1 件のときだけ走査する
+ *   ので、cron が重複実行しても同じ行を二重に処理しない。予約は結果の記録より前に済むため、結果の記録(D1更新)が失敗しても、
+ *   Workers が途中で止まっても、行は先頭に居座らず、予約時刻の経過後に再び対象になる。予約自体に失敗した行はその場で飛ばす。
+ * - 成功: `last_scanned_at = now`、失敗回数 0、次回は経過に応じた間隔(〜7日は毎回、〜90日は週1回、以降は月1回)後。
+ * - 失敗: 失敗回数 +1、次回は指数バックオフ(上限1日・ジッターつき)後。放棄はしない。
+ * 1件の失敗は他の行の処理を止めない。1回の実行は 50 件まで、1件あたり list 1回(該当があれば delete も)。
  */
-export async function sweepDeletions(driver: SyncDriver, store: ObjectStore, now: number): Promise<number> {
-  const rows = await driver.all<{ user_id: string; completed_at: number | null }>({
-    sql: `SELECT d.user_id, d.completed_at FROM account_deletions d
-          WHERE NOT EXISTS (SELECT 1 FROM user u WHERE u.id = d.user_id)
-            AND (d.completed_at IS NULL OR d.last_scanned_at IS NULL OR d.last_scanned_at <= ? - CASE
-                   WHEN ? - d.requested_at <= ? THEN 0
-                   WHEN ? - d.requested_at <= ? THEN ?
-                   ELSE ? END)
-          ORDER BY COALESCE(d.last_scanned_at, 0), d.requested_at LIMIT 50`,
-    params: [
-      now,
-      now,
-      RESCAN_FAST_AGE_MS,
-      now,
-      RESCAN_MID_AGE_MS,
-      RESCAN_MID_INTERVAL_MS,
-      RESCAN_SLOW_INTERVAL_MS,
-    ],
+export async function sweepDeletions(
+  driver: SyncDriver,
+  store: ObjectStore,
+  now: number,
+  random: () => number = Math.random,
+): Promise<number> {
+  const rows = await driver.all<{
+    user_id: string;
+    requested_at: number;
+    completed_at: number | null;
+    scan_failures: number;
+  }>({
+    sql: `SELECT d.user_id, d.requested_at, d.completed_at, d.scan_failures FROM account_deletions d
+          WHERE d.next_scan_at <= ? AND NOT EXISTS (SELECT 1 FROM user u WHERE u.id = d.user_id)
+          ORDER BY d.next_scan_at, d.requested_at LIMIT ?`,
+    params: [now, SWEEP_BATCH],
   });
   let done = 0;
-  for (const { user_id, completed_at } of rows) {
-    if (completed_at !== null) {
-      // 完了済み: 再走査だけ。成功したときだけ最終走査時刻を進める(失敗は次回に再試行)
-      try {
-        await store.deletePrefix(r2PrefixFor(user_id));
-        await driver.batch([
-          { sql: 'UPDATE account_deletions SET last_scanned_at = ? WHERE user_id = ?', params: [now, user_id] },
-        ]);
-      } catch (e) {
-        console.error('[account] 再走査に失敗しました', e instanceof Error ? e.message : 'unknown');
-      }
+  for (const { user_id, requested_at, completed_at, scan_failures } of rows) {
+    try {
+      const [claimed] = await driver.batch([
+        {
+          sql: 'UPDATE account_deletions SET next_scan_at = ? WHERE user_id = ? AND next_scan_at <= ?',
+          params: [now + SCAN_CLAIM_MS, user_id, now],
+        },
+      ]);
+      if (claimed !== 1) continue; // 別のWorkerが処理中
+    } catch (e) {
+      console.error('[account] 再走査の予約に失敗しました', e instanceof Error ? e.message : 'unknown');
       continue;
     }
-    // 進行中のアップロードがあれば完了にせず次回へ回す(失効後に再掃除して完了する)
-    if (await hasLiveUploads(driver, user_id, now)) continue;
-    await store.deletePrefix(r2PrefixFor(user_id));
-    await driver.batch([
-      { sql: 'DELETE FROM image_uploads WHERE user_id = ?', params: [user_id] },
-      {
-        sql: 'UPDATE account_deletions SET completed_at = ?, last_scanned_at = ? WHERE user_id = ?',
-        params: [now, now, user_id],
-      },
-    ]);
-    done++;
+    try {
+      const next = now + rescanInterval(requested_at, now);
+      if (completed_at !== null) {
+        await store.deletePrefix(r2PrefixFor(user_id));
+        await driver.batch([
+          {
+            sql: 'UPDATE account_deletions SET last_scanned_at = ?, scan_failures = 0, next_scan_at = ? WHERE user_id = ?',
+            params: [now, next, user_id],
+          },
+        ]);
+        continue;
+      }
+      // 進行中のアップロードがあれば完了にせず次回(予約時刻の経過後)へ回す
+      if (await hasLiveUploads(driver, user_id, now)) continue;
+      await store.deletePrefix(r2PrefixFor(user_id));
+      await driver.batch([
+        { sql: 'DELETE FROM image_uploads WHERE user_id = ?', params: [user_id] },
+        {
+          sql: 'UPDATE account_deletions SET completed_at = ?, last_scanned_at = ?, scan_failures = 0, next_scan_at = ? WHERE user_id = ?',
+          params: [now, now, next, user_id],
+        },
+      ]);
+      done++;
+    } catch (e) {
+      console.error('[account] 再走査に失敗しました', e instanceof Error ? e.message : 'unknown');
+      // 失敗の記録は best effort。失敗しても予約済みの next_scan_at により先頭を占有しない
+      await driver
+        .batch([
+          {
+            sql: 'UPDATE account_deletions SET scan_failures = scan_failures + 1, next_scan_at = ? WHERE user_id = ?',
+            params: [now + backoffMs(scan_failures + 1, random), user_id],
+          },
+        ])
+        .catch(() => undefined);
+    }
   }
   return done;
 }
