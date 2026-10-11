@@ -1,16 +1,19 @@
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { Button } from '@/components/form-ui';
 import { fontFamily, radius, typography, useTheme } from '@/design';
 
+import { openLegalUrl, PRIVACY_URL, TERMS_URL } from './legal-links';
 import { SettingsScaffold } from './settings-ui';
 import { useDataExport } from './use-settings';
 
-function Row({ title, note }: { title: string; note: string }) {
+function Row({ title, note, onPress }: { title: string; note: string; onPress: () => void }) {
   const colors = useTheme();
   return (
-    <View
+    <Pressable
+      accessibilityRole="link"
+      onPress={onPress}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
@@ -24,7 +27,7 @@ function Row({ title, note }: { title: string; note: string }) {
       <Text style={{ fontFamily: fontFamily.bold, ...typography.label, color: colors.textSecondary }}>
         {note}
       </Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -103,8 +106,8 @@ export function PrivacyScreen() {
           backgroundColor: colors.surface,
         }}
       >
-        <Row title="プライバシーポリシー" note="公開準備中" />
-        <Row title="利用規約" note="公開準備中" />
+        <Row title="プライバシーポリシー" note="開く" onPress={() => openLegalUrl(PRIVACY_URL)} />
+        <Row title="利用規約" note="開く" onPress={() => openLegalUrl(TERMS_URL)} />
       </View>
     </SettingsScaffold>
   );
