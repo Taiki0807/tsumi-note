@@ -87,7 +87,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 export class ImageError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 413 | 415 | 422,
+    readonly status: 400 | 401 | 404 | 409 | 413 | 415 | 422 | 503,
     readonly code: string,
   ) {
     super(code);

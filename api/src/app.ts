@@ -1,4 +1,12 @@
 import { Hono, type Context } from 'hono';
+import {
+  consumeDeleteAttempt,
+  deleteAccount,
+  FRESH_SESSION_MS,
+  getPasswordHash,
+  isDeletionRequested,
+  listProviders,
+} from './account/service';
 import type { Auth } from './auth';
 import { deleteImage, getImage, putImage, type ObjectStore } from './images/service';
 import { ImageError, MAX_IMAGE_BYTES, readBodyWithLimit } from './images/validate';
@@ -40,6 +48,9 @@ export function stripCredentialsFromRedirect(res: Response): Response {
 
 export type AppVariables = {
   userId: string;
+  email: string;
+  /** 現在のセッションを作成した(=ログインした)時刻(epoch ms) */
+  sessionCreatedAt: number;
 };
 
 type WaitUntil = (promise: Promise<unknown>) => void;
@@ -78,11 +89,65 @@ export function createApp(
     if (!session) return c.json({ error: 'unauthorized' }, 401);
     if (!session.user.emailVerified) return c.json({ error: 'email_not_verified' }, 403);
     c.set('userId', session.user.id);
+    c.set('email', session.user.email);
+    c.set('sessionCreatedAt', new Date(session.session.createdAt).getTime());
+    // 削除を依頼済みのアカウントは、削除の状態確認(GET)と再試行(DELETE)以外すべて拒否する
+    // (他端末からの再同期・再アップロードを遮断)。削除の再試行は引き続きパスワード/直近ログインで本人確認する
+    const isAccountEndpoint =
+      c.req.path === '/v1/account' && (c.req.method === 'GET' || c.req.method === 'DELETE');
+    if (getSyncDriver && !isAccountEndpoint && (await isDeletionRequested(getSyncDriver(), session.user.id))) {
+      return c.json({ error: 'account_deleted' }, 401);
+    }
     await next();
   });
 
   // セッション復元・認可の動作確認用
   app.get('/v1/me', (c) => c.json({ id: c.get('userId') }));
+
+  // ---- アカウント情報・削除。対象は常にセッション由来のユーザー(他人のIDは指定できない) ----
+  app.get('/v1/account', async (c) => {
+    const driver = syncDriver();
+    const providers = await listProviders(driver, c.get('userId'));
+    // 削除が途中で止まっているアカウントは deletionPending=true(アプリは削除の再試行を案内する)
+    const deletionPending = await isDeletionRequested(driver, c.get('userId'));
+    return c.json({ id: c.get('userId'), email: c.get('email'), providers, deletionPending });
+  });
+
+  app.delete('/v1/account', async (c) => {
+    const userId = c.get('userId');
+    const driver = syncDriver();
+    let body: { confirm?: unknown; password?: unknown } = {};
+    try {
+      body = (await c.req.json()) ?? {};
+    } catch {
+      return c.json({ error: 'invalid_request' }, 400);
+    }
+    if (body.confirm !== true) return c.json({ error: 'confirmation_required' }, 400);
+
+    // 本人確認: パスワードのアカウントは現在のパスワード、ソーシャルのみのアカウントは直近のログインを要求する
+    const now = Date.now();
+    const hash = await getPasswordHash(driver, userId);
+    if (hash) {
+      if (typeof body.password !== 'string' || body.password.length === 0 || body.password.length > 256) {
+        return c.json({ error: 'password_required' }, 403);
+      }
+      if (!(await consumeDeleteAttempt(driver, userId, now))) return c.json({ error: 'rate_limited' }, 429);
+      const ctx = await getAuth(waitUntilOf(c)).$context;
+      if (!(await ctx.password.verify({ hash, password: body.password }))) {
+        return c.json({ error: 'invalid_password' }, 403);
+      }
+    } else if (now - c.get('sessionCreatedAt') > FRESH_SESSION_MS) {
+      return c.json({ error: 'reauth_required' }, 403);
+    }
+
+    try {
+      await deleteAccount(driver, imageDeps().store, userId, now);
+    } catch {
+      // 失敗の詳細(個人情報を含み得る)は返さない。同じ要求の再送で続きから完了する
+      return c.json({ error: 'delete_incomplete' }, 500);
+    }
+    return c.json({ deleted: true });
+  });
 
   // ---- 差分同期。ユーザーは常にセッション由来(本文・クエリにユーザーIDは存在しない) ----
   const syncDriver = (): SyncDriver => {

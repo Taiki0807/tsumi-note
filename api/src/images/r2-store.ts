@@ -16,5 +16,13 @@ export function createR2Store(bucket: R2Bucket): ObjectStore {
     async delete(key) {
       await bucket.delete(key);
     },
+    async deletePrefix(prefix) {
+      let cursor: string | undefined;
+      do {
+        const page = await bucket.list({ prefix, cursor, limit: 500 });
+        if (page.objects.length > 0) await bucket.delete(page.objects.map((o) => o.key));
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+    },
   };
 }

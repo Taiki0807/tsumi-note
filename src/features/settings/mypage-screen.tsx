@@ -7,7 +7,9 @@ import { AppIcon } from '@/components/app-icon';
 import { Icon, type IconName } from '@/components/icons';
 import { fontFamily, layout, lightColors, radius, typography, useTheme } from '@/design';
 import { useAuth } from '@/features/auth/auth-context';
-import { SignedInCard } from '@/features/auth/signed-in-card';
+import { GuestAccountHint } from '@/features/account/guest-account-hint';
+import { AccountSummary } from '@/features/account/account-summary';
+import { useSync } from '@/sync/sync-provider';
 import { splitDuration } from '@/features/records/records-logic';
 import { TimerSettingsModal } from '@/features/timer/timer-settings-modal';
 
@@ -110,6 +112,7 @@ export function MyPageScreen() {
   const systemDark = useColorScheme() === 'dark';
   const { summary, setDarkMode } = useMyPage();
   const auth = useAuth();
+  const sync = useSync();
   const timer = useTimerSettings();
   const [timerSheet, setTimerSheet] = useState(false);
 
@@ -154,8 +157,10 @@ export function MyPageScreen() {
       >
         {summary ? (
           <>
-            {/* ログイン済みの表示は Figma 16 に基づき PR 6 で実装する。それまでは暫定カードでアカウントとログアウトを示す。 */}
-            {auth.state.status === 'signedIn' ? <SignedInCard email={auth.state.user.email} /> : null}
+            {/* Figma 16 Account: タップでアカウント画面(Figma 17)へ。ログアウト・削除はそちらに置く。 */}
+            {auth.state.status === 'signedIn' ? (
+              <AccountSummary email={auth.state.user.email} sync={sync} />
+            ) : null}
             {/* Figma Sync prompt: primary card, 20pt radius, 18pt padding, white content. */}
             {auth.state.status !== 'signedIn' ? (
               <View style={{ gap: 12, padding: 18, borderRadius: 20, backgroundColor: colors.primary }}>
@@ -194,33 +199,62 @@ export function MyPageScreen() {
                   ノート{summary.noteCount}件・問題{summary.questionCount}問・学習時間{' '}
                   {formatStudyTime(summary.studySeconds)}を、iPhone と iPad のどちらでも使えます。
                 </Text>
-                {/* Figma Button/アカウントを作成: white fill and primary text in both themes (fixed Figma values), 44pt, full radius. */}
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => router.push('/account/create')}
-                  style={{
-                    height: 44,
-                    alignSelf: 'flex-start',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    paddingHorizontal: 20,
-                    borderRadius: radius.full,
-                    backgroundColor: lightColors.surface,
-                  }}
-                >
-                  <Text
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                  {/* Figma Button/アカウントを作成: white fill and primary text in both themes (fixed Figma values), 44pt, full radius. */}
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => router.push('/account/create')}
                     style={{
-                      fontFamily: fontFamily.extraBold,
-                      ...typography.body,
-                      lineHeight: 22,
-                      color: lightColors.primary,
+                      height: 44,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      paddingHorizontal: 20,
+                      borderRadius: radius.full,
+                      backgroundColor: lightColors.surface,
                     }}
                   >
-                    アカウントを作成
-                  </Text>
-                </Pressable>
+                    <Text
+                      style={{
+                        fontFamily: fontFamily.extraBold,
+                        ...typography.body,
+                        lineHeight: 22,
+                        color: lightColors.primary,
+                      }}
+                    >
+                      アカウントを作成
+                    </Text>
+                  </Pressable>
+                  {/* ログイン(Figma 15 には無い追加): 同じ 44pt・full radius で、白い枠線のみの副ボタン */}
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => router.push('/account/login')}
+                    style={{
+                      height: 44,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      paddingHorizontal: 20,
+                      borderRadius: radius.full,
+                      borderWidth: 1.5,
+                      borderColor: colors.textOnPrimary,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: fontFamily.extraBold,
+                        ...typography.body,
+                        lineHeight: 22,
+                        color: colors.textOnPrimary,
+                      }}
+                    >
+                      ログイン
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
             ) : null}
+
+            {/* ゲスト利用中の説明とログイン導線。Figma 15 には無い追加(PR 6): 既存トークンのみ・未デザイン。 */}
+            {auth.state.status !== 'signedIn' ? <GuestAccountHint configured={auth.configured} /> : null}
 
             {/* Figma Goal link: 16pt padding, 44pt radius-12 tile with a 22pt target icon. */}
             <Pressable

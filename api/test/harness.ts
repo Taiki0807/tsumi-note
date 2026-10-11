@@ -42,10 +42,12 @@ export function createHarness(
     },
   });
   const objects = new Map<string, Uint8Array>();
+  /** R2 の障害を再現する(アカウント削除の途中失敗のテスト用) */
+  const faults: Faults = { deletePrefix: false, beforePut: null, readDeletion: false, failBatchOn: null };
   const app = createApp(
     () => auth,
-    () => bunDriver(sqlite),
-    () => memoryStore(objects),
+    () => faultyDriver(bunDriver(sqlite), faults),
+    () => faultyStore(memoryStore(objects), faults),
   );
 
   let ipCounter = 0;
@@ -87,7 +89,47 @@ export function createHarness(
     } as RequestInit);
   }
 
-  return { sqlite, sent, request, raw, objects, lastLink };
+  return { sqlite, sent, request, raw, objects, lastLink, faults, app, baseURL: opts.baseURL ?? BASE };
+}
+
+type Faults = {
+  deletePrefix: boolean;
+  beforePut: Promise<void> | null;
+  /** true の間、削除依頼の確認(account_deletions の読み取り)がD1障害で失敗する */
+  readDeletion: boolean;
+  /** 設定した文字列を含むSQLを実行する batch を失敗させる */
+  failBatchOn: string | null;
+};
+
+function faultyDriver(inner: SyncDriver, faults: Faults): SyncDriver {
+  return {
+    async all<T>(s: SqlStatement): Promise<T[]> {
+      if (faults.readDeletion && s.sql.includes('SELECT user_id FROM account_deletions')) {
+        throw new Error('D1 unavailable');
+      }
+      return inner.all<T>(s);
+    },
+    async batch(statements: SqlStatement[]): Promise<number[]> {
+      const target = faults.failBatchOn;
+      if (target && statements.some((s) => s.sql.includes(target))) throw new Error('D1 unavailable');
+      return inner.batch(statements);
+    },
+  };
+}
+
+function faultyStore(inner: ObjectStore, faults: Faults): ObjectStore {
+  return {
+    ...inner,
+    /** beforePut が設定されていれば、解決するまで書き込みを止める(遅延・並行のテスト用) */
+    async put(key, data, contentType) {
+      if (faults.beforePut) await faults.beforePut;
+      await inner.put(key, data, contentType);
+    },
+    async deletePrefix(prefix) {
+      if (faults.deletePrefix) throw new Error('R2 unavailable');
+      await inner.deletePrefix(prefix);
+    },
+  };
 }
 
 /** テスト用のR2代替(メモリ)。キーは本番と同じくサーバーが決めたものがそのまま入る */
@@ -104,6 +146,9 @@ export function memoryStore(objects: Map<string, Uint8Array>): ObjectStore {
     },
     async delete(key) {
       objects.delete(key);
+    },
+    async deletePrefix(prefix) {
+      for (const key of [...objects.keys()]) if (key.startsWith(prefix)) objects.delete(key);
     },
   };
 }

@@ -19,7 +19,7 @@ export function createTestServer(users: string[]) {
   sqlite.pragma('foreign_keys = ON');
   sqlite.exec('CREATE TABLE user (id text PRIMARY KEY NOT NULL)');
   for (const u of users) sqlite.prepare('INSERT INTO user (id) VALUES (?)').run(u);
-  for (const file of ['0001_sync.sql', '0002_images.sql']) {
+  for (const file of ['0001_sync.sql', '0002_images.sql', '0003_account_deletions.sql', '0004_image_uploads.sql', '0005_r2_cleanup_tasks.sql']) {
     const migration = readFileSync(path.join(__dirname, '../../api/migrations', file), 'utf8');
     for (const stmt of migration.split('--> statement-breakpoint')) if (stmt.trim()) sqlite.exec(stmt);
   }
@@ -37,6 +37,9 @@ export function createTestServer(users: string[]) {
     },
     async delete(key) {
       objects.delete(key);
+    },
+    async deletePrefix(prefix) {
+      for (const key of [...objects.keys()]) if (key.startsWith(prefix)) objects.delete(key);
     },
   };
   /** サーバーの時計(画像削除の猶予時間の判定に使う) */
