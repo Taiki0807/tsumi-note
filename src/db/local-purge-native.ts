@@ -3,6 +3,7 @@ import { deleteDatabaseAsync } from 'expo-sqlite';
 import * as SecureStore from 'expo-secure-store';
 
 import { runPendingPurge, type PurgeDeps, type PurgeStorage } from './local-purge';
+import { GUEST_IMAGE_DIRECTORY } from './ownership';
 
 const KEY = 'tsumi-note.pending-purge';
 
@@ -35,6 +36,11 @@ const nativeDeps: PurgeDeps = {
     if (directory.exists) directory.delete();
   },
 };
+
+/** ゲストの画像ディレクトリを削除する(次に使うときに空のディレクトリが作られる)。アカウントの画像には触れない */
+export function deleteGuestImages(): void {
+  nativeDeps.deleteImageDirectory(GUEST_IMAGE_DIRECTORY);
+}
 
 export function runPendingLocalPurge(activeDatabaseName: string): Promise<boolean> {
   return runPendingPurge(nativeDeps, activeDatabaseName);

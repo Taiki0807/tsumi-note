@@ -11,7 +11,12 @@
     "ios": {
       "supportsTablet": true,
       "usesAppleSignIn": true,
-      "bundleIdentifier": "dev.hosokawalab.tsuminote"
+      "bundleIdentifier": "dev.hosokawalab.tsuminote",
+      "infoPlist": {
+        "CFBundleDevelopmentRegion": "ja",
+        "CFBundleLocalizations": ["ja"]
+      },
+      "buildNumber": "3"
     },
     "web": {
       "bundler": "metro",
