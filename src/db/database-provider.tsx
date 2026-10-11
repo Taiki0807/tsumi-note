@@ -17,6 +17,13 @@ import migrations from '../../drizzle/migrations';
 import { closeDatabasesExcept, createRepositoryDeps, openDatabase } from './client';
 import { databaseNameForOwner, type OwnerId } from './ownership';
 import { ownerHintStorage } from './owner-hint-storage';
+import {
+  consumeDeviceWipe,
+  setWipeNotice,
+  WIPE_DONE_MESSAGE,
+  WIPE_FAILED_MESSAGE,
+} from './device-wipe';
+import { wipeDeviceNative } from './device-wipe-native';
 import { runPendingLocalPurge } from './local-purge-native';
 import { createRepositories, type Repositories } from './repositories';
 import { resolveOwner, syncOwnerHint, type OwnerAuthState } from './resolve-owner';
@@ -99,6 +106,16 @@ function OwnerDatabase({
     // After an account deletion completed on the server, remove that account's now-closed local files.
     void runPendingLocalPurge(databaseName);
   }, [databaseName]);
+
+  // 「端末内のデータをすべて削除」(ログイン中)は、ログアウトでゲストに切り替わり、アカウントの接続が閉じた後に
+  // 1回だけ実行する。合図はメモリ上だけで、再起動・期限切れ・ログアウト失敗では実行されない。
+  useEffect(() => {
+    if (!success || owner !== null || !consumeDeviceWipe()) return;
+    wipeDeviceNative(db)
+      .then(() => setWipeNotice({ tone: 'success', message: WIPE_DONE_MESSAGE }))
+      .catch(() => setWipeNotice({ tone: 'error', message: WIPE_FAILED_MESSAGE }))
+      .finally(reload);
+  }, [success, owner, db, reload]);
 
   if (error) return <>{renderError?.(error) ?? null}</>;
   if (!success) return <>{fallback}</>;

@@ -1,14 +1,12 @@
-import * as Notifications from 'expo-notifications';
 import { useRef, useState } from 'react';
-import { Alert, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { BottomSheet, Button } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, radius, typography, useTheme } from '@/design';
 import { useDatabaseContext } from '@/db/database-provider';
-import { requestLocalPurge } from '@/db/local-purge';
-import { deleteGuestImages, purgeStorage } from '@/db/local-purge-native';
-import { wipeDatabaseRows } from '@/db/local-wipe';
+import { armDeviceWipe, disarmDeviceWipe, takeWipeNotice, WIPE_DONE_MESSAGE, type WipeNotice } from '@/db/device-wipe';
+import { wipeDeviceNative } from '@/db/device-wipe-native';
 import { useAuth } from '@/features/auth/auth-context';
 import { Notice } from '@/features/auth/auth-ui';
 import { useSync } from '@/sync/sync-provider';
@@ -18,6 +16,7 @@ import { deleteLocalData, describeLocalDeletion } from './local-data-deletion';
 /**
  * プライバシーとデータ内の「端末内のデータをすべて削除」(Figma に無い追加。既存の BottomSheet / Button / Notice のみ)。
  * 削除の範囲・ログイン中の扱いは local-data-deletion.ts を参照。
+ * 結果の通知は、アプリの共通の通知 Notice(成功=successSoft / 失敗=dangerSoft)を画面内に表示する。
  */
 export function LocalDataDeletionSection() {
   const colors = useTheme();
@@ -28,6 +27,8 @@ export function LocalDataDeletionSection() {
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  // ログアウトでDBが切り替わると画面が作り直されるため、直近の結果は作り直し後に受け取る
+  const [result, setResult] = useState<WipeNotice | null>(() => takeWipeNotice());
 
   // 所有者(開いているDB)とログイン状態が一致するときだけ実行できる。セッション復元中などは無効にする
   const signedIn = state.status === 'signedIn' && owner !== null && state.user.id === owner;
@@ -45,27 +46,25 @@ export function LocalDataDeletionSection() {
     inFlight.current = true;
     setBusy(true);
     setError(null);
+    setResult(null);
     try {
-      const result = await deleteLocalData({
+      const outcome = await deleteLocalData({
         accountId: owner,
-        wipeGuest: async () => {
-          wipeDatabaseRows(db);
-          deleteGuestImages();
-          // 予約済みの通知(リマインダー・タイマー)が、削除したデータの設定のまま残らないようにする
-          await Notifications.cancelAllScheduledNotificationsAsync().catch(() => undefined);
-        },
-        requestAccountPurge: (id) => requestLocalPurge(purgeStorage, id),
-        cancelAccountPurge: () => purgeStorage.clear(),
+        wipeNow: () => wipeDeviceNative(db),
+        arm: armDeviceWipe,
+        disarm: disarmDeviceWipe,
         signOut: () => api.signOut(),
       });
-      if (!result.ok) {
-        setError(result.message);
+      if (!outcome.ok) {
+        setError(outcome.message);
         return;
       }
       setOpen(false);
-      Alert.alert(copy.doneTitle, copy.doneMessage);
-      // ゲスト: 画面を再読み込みして空の状態を表示する(ログイン中はログアウトによりDBごと切り替わる)
-      if (owner === null) reload();
+      // ログイン中: 削除はログアウト後(ゲストDBへ切り替わった後)に DatabaseProvider が1回だけ実行し、結果を通知する
+      if (!outcome.deferred) {
+        setResult({ tone: 'success', message: WIPE_DONE_MESSAGE });
+        reload();
+      }
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -97,9 +96,10 @@ export function LocalDataDeletionSection() {
         }}
       >
         {owner === null
-          ? 'この端末に保存されている学習記録、ノート、復習データなどをすべて削除します。元に戻せません。'
-          : 'この端末に保存されているこのアカウントのデータを削除して、ログアウトします。クラウドのデータは削除されず、再ログインすると読み込まれます。クラウドのデータを削除するには、アカウントを削除してください。'}
+          ? 'ゲストと、この端末に残っているすべてのアカウントのローカルデータを削除します。クラウドやほかの端末のデータは削除されません。元に戻せません。'
+          : 'ログアウトして、ゲストと、この端末に残っているすべてのアカウントのローカルデータを削除します。クラウドのデータは削除されず、再ログインすると読み込まれます。クラウドのデータを削除するには、アカウントを削除してください。'}
       </Text>
+      {result ? <Notice tone={result.tone}>{result.message}</Notice> : null}
       <Button
         variant="danger"
         label="端末内のデータをすべて削除"
