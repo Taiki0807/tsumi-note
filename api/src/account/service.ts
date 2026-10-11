@@ -11,10 +11,14 @@ export const DELETE_ATTEMPT_MAX = 5;
 export const UPLOAD_LEASE_MS = 10 * 60 * 1000;
 
 /**
- * 掃除タスクを消せるまでの猶予(リース + これ)。アップロードは UPLOAD_LEASE_MS で打ち切るが、中断できない R2 書き込みが
- * 遅れて着地し得るため、この期間は R2 のキーを繰り返し削除し、タスクを残す。
+ * 掃除タスクの保持期間(リース + これ)。アップロードは UPLOAD_LEASE_MS で待機を打ち切るが、R2 の書き込み自体は
+ * 中断できず、いつ終わるかの上限は保証できない。そのため「待てば終わっているはず」には依存せず、
+ * この期間は R2 のキー(タスク)とアカウントのプレフィックス(sweepDeletions)を繰り返し削除し続ける。
+ * 保持期間を超えて着地する書き込みは回収できない(残存リスク。docs/PHASE8_DESIGN.md §12.3.6)。
  */
-export const CLEANUP_GRACE_MS = 60 * 60 * 1000;
+export const CLEANUP_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+/** 生きているアカウントのタスクを処理し始める、リース終了からの余白(コミット中のアップロードを消さないため) */
+const LIVE_USER_MARGIN_MS = 10 * 60 * 1000;
 
 /** 進行中のアップロードがあるため削除を完了できない(アップロードの終了後に再試行で完了する) */
 export class DeletionPendingError extends Error {
@@ -130,14 +134,23 @@ export async function deleteAccount(
 
 /** user 行は消えたが R2 の掃除が済んでいない削除を完了させる(定期実行)。完了した件数を返す */
 export async function sweepDeletions(driver: SyncDriver, store: ObjectStore, now: number): Promise<number> {
-  const rows = await driver.all<{ user_id: string }>({
-    sql: `SELECT d.user_id FROM account_deletions d
-          WHERE d.completed_at IS NULL AND NOT EXISTS (SELECT 1 FROM user u WHERE u.id = d.user_id)
-          LIMIT 50`,
-    params: [],
+  // 未完了の削除に加え、完了済みでも保持期間中は R2 のプレフィックスを再走査する(遅れて着地した書き込みの回収)
+  const rows = await driver.all<{ user_id: string; completed_at: number | null }>({
+    sql: `SELECT d.user_id, d.completed_at FROM account_deletions d
+          WHERE (d.completed_at IS NULL OR d.requested_at > ?)
+            AND NOT EXISTS (SELECT 1 FROM user u WHERE u.id = d.user_id)
+          ORDER BY d.requested_at LIMIT 50`,
+    params: [now - UPLOAD_LEASE_MS - CLEANUP_GRACE_MS],
   });
   let done = 0;
-  for (const { user_id } of rows) {
+  for (const { user_id, completed_at } of rows) {
+    if (completed_at !== null) {
+      // 完了済み: 再走査だけ(失敗は次回に再試行)
+      await store
+        .deletePrefix(r2PrefixFor(user_id))
+        .catch((e) => console.error('[account] 再走査に失敗しました', e instanceof Error ? e.message : 'unknown'));
+      continue;
+    }
     // 進行中のアップロードがあれば完了にせず次回へ回す(失効後に再掃除して完了する)
     if (await hasLiveUploads(driver, user_id, now)) continue;
     await store.deletePrefix(r2PrefixFor(user_id));
@@ -160,26 +173,38 @@ export async function sweepCleanupTasks(
   store: ObjectStore,
   now: number = Date.now(),
 ): Promise<number> {
-  // 削除依頼の無いユーザーのタスク(正常終了時の消し残し)はR2に触れず、猶予後に行だけを捨てる
-  await driver
-    .batch([
-      {
-        sql: `DELETE FROM r2_cleanup_tasks
-              WHERE created_at < ? AND NOT EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = r2_cleanup_tasks.user_id)`,
-        params: [now - 24 * 60 * 60 * 1000],
-      },
-    ])
-    .catch((e) => console.error('[account] 古い掃除タスクの整理に失敗しました', e instanceof Error ? e.message : 'unknown'));
-  const rows = await driver.all<{ id: string; r2_key: string; user_id: string; created_at: number }>({
-    sql: `SELECT t.id, t.r2_key, t.user_id, t.created_at FROM r2_cleanup_tasks t
-          WHERE EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = t.user_id)
+  // 削除依頼のあるユーザーのタスクは常に対象。生きているユーザーのタスクは、アップロードのリースと余白が過ぎたものだけ
+  // (中断・失敗したアップロードの残骸。キーは一意で、image_objects が参照していなければ誰も使わない)
+  const rows = await driver.all<{
+    id: string;
+    r2_key: string;
+    user_id: string;
+    created_at: number;
+    deleted: number;
+  }>({
+    sql: `SELECT t.id, t.r2_key, t.user_id, t.created_at,
+                 EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = t.user_id) AS deleted
+          FROM r2_cleanup_tasks t
+          WHERE t.created_at < ? OR EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = t.user_id)
           ORDER BY t.created_at LIMIT 100`,
-    params: [],
+    params: [now - UPLOAD_LEASE_MS - LIVE_USER_MARGIN_MS],
   });
   let done = 0;
-  for (const { id, r2_key, user_id, created_at } of rows) {
+  for (const { id, r2_key, user_id, created_at, deleted } of rows) {
     if (!r2_key.startsWith(r2PrefixFor(user_id))) continue;
     try {
+      if (!deleted) {
+        // 生きているユーザー: 本体を参照する行があれば(コミット済みの消し残し)、R2には触れずタスクだけ捨てる
+        const refs = await driver.all<{ n: number }>({
+          sql: 'SELECT COUNT(*) AS n FROM image_objects WHERE user_id = ? AND r2_key = ?',
+          params: [user_id, r2_key],
+        });
+        if ((refs[0]?.n ?? 0) > 0) {
+          await driver.batch([{ sql: 'DELETE FROM r2_cleanup_tasks WHERE id = ?', params: [id] }]);
+          done++;
+          continue;
+        }
+      }
       await store.delete(r2_key);
       // リース失効 = 書き込み完了ではない。停止していた書き込みが後から着地し得るので、
       // 保証期間(リース + 猶予)が過ぎるまでタスクは消さず、次回以降も同じキーを削除する(冪等)

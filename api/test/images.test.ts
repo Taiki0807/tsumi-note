@@ -48,7 +48,8 @@ describe('画像API: アップロード・取得', () => {
     await put(h, a, 'img1.png', bytes);
     const keys = [...h.objects.keys()];
     expect(keys).toHaveLength(1);
-    expect(keys[0]).toMatch(new RegExp(`^u/[^/]+/${sha(bytes)}$`));
+    // アップロードごとに一意なキー(失敗・期限切れのキーを再利用しない)。内容のハッシュは含まない
+    expect(keys[0]).toMatch(/^u\/[^/]+\/[0-9a-f-]{36}$/);
   });
 
   test('同じ内容は再アップロードされず(重複排除)、同じ操作の再送は冪等', async () => {

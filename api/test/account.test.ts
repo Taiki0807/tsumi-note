@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { bunDriver, createHarness, memoryStore, PASSWORD, registerAndLogin } from './harness';
+import { putImage as putImageService } from '../src/images/service';
 import { CLEANUP_GRACE_MS, sweepCleanupTasks, sweepDeletions, UPLOAD_LEASE_MS } from '../src/account/service';
 
 type H = ReturnType<typeof createHarness>;
@@ -433,7 +434,7 @@ describe('アカウント削除と画像アップロードの競合', () => {
       idB,
       1,
     ]);
-    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), 10 * 24 * 3600 * 1000)).toBe(0);
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), 10 * 24 * 3600 * 1000)).toBe(1);
     expect(count(h, 'r2_cleanup_tasks')).toBe(0);
     expect(userObjects(h, idA).length).toBe(1);
     expect(userObjects(h, idB).length).toBe(1);
@@ -467,6 +468,121 @@ describe('アカウント削除と画像アップロードの競合', () => {
     expect(userObjects(h, idA)).toEqual([]);
     expect(userObjects(h, idB).length).toBe(2);
     expect(count(h, 'r2_cleanup_tasks')).toBe(0);
+  });
+
+  describe('PUTの待機がタイムアウトしても実際のPUTは進行中として扱う', () => {
+    /** put が gate で止まるストア。タイムアウトを短くして putImage を直接呼ぶ */
+    const gated = (h: H, g: ReturnType<typeof gate>) => {
+      const inner = memoryStore(h.objects);
+      return {
+        ...inner,
+        async put(key: string, data: Uint8Array, ct: string) {
+          await g.promise;
+          await inner.put(key, data, ct);
+        },
+      };
+    };
+    const startUpload = (
+      h: H,
+      userId: string,
+      store: ReturnType<typeof gated>,
+      bytes: Uint8Array,
+      name: string,
+      deadlineMs = 30,
+    ) =>
+      putImageService(
+        bunDriver(h.sqlite),
+        store,
+        userId,
+        { fileName: name, bytes, declaredSha256: sha(bytes), contentType: 'image/png' },
+        Date.now(),
+        deadlineMs,
+      );
+
+    test('タイムアウト → 削除 → 掃除 → PUT着地 → D1読み取り障害 → 復旧後に回収される', async () => {
+      const { h, a, idA, idB } = await setup();
+      const g = gate();
+      const store = gated(h, g);
+      // 1-3: PUTを開始して未完了のまま、待機がタイムアウトする(取り消しは別の一意キー)
+      await expect(startUpload(h, idA, store, png(60), 'to1.png')).rejects.toMatchObject({ status: 503 });
+      const task = h.sqlite.query('SELECT id, r2_key, status FROM r2_cleanup_tasks WHERE user_id = ?').get(idA) as any;
+      expect(task.status).toBe('abandoned'); // 完了を確認できていないので追跡は残る
+      expect(task.r2_key).toBe(`u/${idA}/${task.id}`);
+      // 4-5: アカウント削除を開始/完了。続けて rollback 相当(削除)と掃除を実行
+      expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+      const drv = bunDriver(h.sqlite);
+      expect(await sweepCleanupTasks(drv, memoryStore(h.objects))).toBe(0);
+      expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(1); // 早期に消さない
+      // 7: 停止していたPUTが着地(8: D1読み取り障害の最中)
+      h.faults.readDeletion = true;
+      g.open();
+      await tick();
+      h.faults.readDeletion = false;
+      // 着地後、元のリクエストがD1に触れなくても、PUT完了フックまたは掃除で回収される
+      // (フック: 完了後に store.delete を試みる。ここでは掃除の再走査でも回収できることを確認)
+      expect(await sweepCleanupTasks(drv, memoryStore(h.objects))).toBe(0);
+      await sweepDeletions(drv, memoryStore(h.objects), Date.now());
+      expect(userObjects(h, idA)).toEqual([]);
+      expect(userObjects(h, idB).length).toBe(1); // 他アカウントは残る
+      // 保持期間を過ぎてはじめてタスクが消える。再実行しても同じ
+      expect(await sweepCleanupTasks(drv, memoryStore(h.objects), afterGuarantee())).toBe(1);
+      expect(await sweepCleanupTasks(drv, memoryStore(h.objects), afterGuarantee())).toBe(0);
+    });
+
+    test('プレフィックス再走査: 削除完了後の保持期間中に着地したオブジェクトも、タスクが無くても回収される', async () => {
+      const { h, a, idA } = await setup();
+      expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+      h.objects.set(`u/${idA}/late-key`, png(61)); // 完了後に遅れて着地
+      const drv = bunDriver(h.sqlite);
+      expect(await sweepDeletions(drv, memoryStore(h.objects), Date.now())).toBe(0); // 新たな完了ではない
+      expect(userObjects(h, idA)).toEqual([]);
+      // 保持期間を過ぎた後は再走査しない(保証の限界)
+      h.objects.set(`u/${idA}/very-late`, png(62));
+      await sweepDeletions(drv, memoryStore(h.objects), afterGuarantee());
+      expect(userObjects(h, idA).length).toBe(1);
+    });
+
+    test('PUTが永久に完了しない場合: 503を返しR2には何も書かれず、タスクが追跡し続ける', async () => {
+      const { h, idA } = await setup();
+      const g = gate(); // 開かない
+      await expect(startUpload(h, idA, gated(h, g), png(63), 'forever.png')).rejects.toMatchObject({ status: 503 });
+      expect(count(h, 'image_uploads', `user_id = '${idA}'`)).toBe(0); // 削除の完了を妨げない
+      expect(count(h, 'image_objects', `user_id = '${idA}' AND file_name = 'forever.png'`)).toBe(0);
+      expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}' AND status = 'abandoned'`)).toBe(1);
+      // 生きているアカウントでも、余白を過ぎれば残骸キーを掃除し、保持期間後にタスクを捨てる
+      const drv = bunDriver(h.sqlite);
+      expect(await sweepCleanupTasks(drv, memoryStore(h.objects), Date.now() + UPLOAD_LEASE_MS + 11 * 60 * 1000)).toBe(0);
+      expect(await sweepCleanupTasks(drv, memoryStore(h.objects), afterGuarantee())).toBe(1);
+      expect(userObjects(h, idA).length).toBe(1); // 正常な a1.png は残る
+    });
+
+    test('遅延PUTは一意キーに書くので、同じ内容の既存の正常画像を上書きしない', async () => {
+      const { h, idA } = await setup();
+      const before = new Map(h.objects);
+      const g = gate();
+      // 既存の a1.png とは別の内容。タイムアウト後に着地しても、既存キーは変わらない
+      await expect(startUpload(h, idA, gated(h, g), png(64), 'other.png')).rejects.toMatchObject({ status: 503 });
+      g.open();
+      await tick();
+      for (const [k, v] of before) expect(h.objects.get(k)).toEqual(v);
+    });
+
+    test('削除中のタイムアウト: 取り消しでも掃除タスクを消さない', async () => {
+      const { h, a, idA } = await setup();
+      const g = gate();
+      const store = gated(h, g);
+      const first = startUpload(h, idA, store, png(65), 'race.png', 1500);
+      first.catch(() => undefined);
+      await tick();
+      expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(500); // アップロード中
+      await expect(first).rejects.toMatchObject({ status: 401 }); // タイムアウト → 削除中なので取り消し
+      expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}' AND status = 'abandoned'`)).toBe(1);
+      g.open(); // その後に着地
+      await tick();
+      expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+      await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects));
+      expect(userObjects(h, idA)).toEqual([]);
+    });
   });
 
   test('他アカウントの画像アップロードは影響を受けない', async () => {

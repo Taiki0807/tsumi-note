@@ -5,7 +5,7 @@ import { ImageError, kindFromFileName, validateUpload } from './validate';
 /**
  * ノート画像のサーバー側ロジック(R2 + D1)。
  *
- * - R2 のオブジェクトキーはサーバーが `u/<userId>/<sha256>` で決める。クライアントはファイル名しか渡せず、
+ * - R2 のオブジェクトキーはサーバーが `u/<userId>/<uploadId>`(アップロードごとに一意)で決める。クライアントはファイル名しか渡せず、
  *   すべてのSQLは `user_id = ?`(セッション由来)で絞るので、他人の画像には到達できない(存在しない扱い)。
  * - 画像名は不変(ランダムID)。同名・同内容の再送は冪等。同名で別内容は 409。
  * - D1 の行は R2 への保存が成功した後にだけ書く。行がある = 本体がR2にある。
@@ -31,7 +31,7 @@ type Row = {
   deleted_at: number | null;
 };
 
-const keyFor = (userId: string, sha256: string) => `u/${userId}/${sha256}`;
+const keyFor = (userId: string, uploadId: string) => `u/${userId}/${uploadId}`;
 
 async function findRow(driver: SyncDriver, userId: string, fileName: string): Promise<Row | undefined> {
   const rows = await driver.all<Row>({
@@ -53,17 +53,28 @@ export async function putImage(
     contentType: string | undefined;
   },
   now: number,
+  /** R2 操作の待ち時間の上限(テストで短縮する)。待機を打ち切るだけで、R2 の操作自体は中断できない */
+  deadlineMs: number = UPLOAD_LEASE_MS,
 ): Promise<{ sha256: string; size: number; deduplicated: boolean }> {
   const { sha256, contentType } = await validateUpload(input);
   const existing = await findRow(driver, userId, input.fileName);
   if (existing && existing.sha256 !== sha256) throw new ImageError(409, 'file_name_conflict');
 
-  // 書き込みの前に「進行中のアップロード」と「掃除タスク(書き込み先キー)」を1バッチで原子的に記録する。
+  // アップロードごとに一意なR2キー(`u/<userId>/<uploadId>`)を使う。失敗・期限切れのアップロードのキーは再利用されず、
+  // 遅れて着地したPUTが既存の正常な画像を上書きすることもない。同じ内容の有効な画像が既にあれば、そのキーを共有して再送しない。
+  const uploadId = crypto.randomUUID();
+  const candidates = await driver.all<{ r2_key: string }>({
+    sql: 'SELECT r2_key FROM image_objects WHERE user_id = ? AND sha256 = ? AND deleted_at IS NULL LIMIT 1',
+    params: [userId, sha256],
+  });
+  const shared = candidates[0]?.r2_key;
+  const present = shared !== undefined && (await withDeadline(store.head(shared), deadlineMs));
+  const key = present ? shared : keyFor(userId, uploadId);
+
+  // 書き込みの前に「進行中のアップロード」と「掃除タスク(書き込み先キー、状態 pending)」を1バッチで原子的に記録する。
   // どちらも削除依頼が出ていれば作れない。タスクはR2へ書く前に永続化されるので、書き込み後にD1が読めなくても、
   // アカウント削除の完了後に遅れて書き込まれても、定期掃除(sweepCleanupTasks)が書き込み先を特定して消せる。
   // 記録できなければ(D1障害など)R2へは何も書かない。
-  const uploadId = crypto.randomUUID();
-  const key = keyFor(userId, sha256);
   const [started] = await driver.batch([
     {
       sql: `INSERT INTO image_uploads (id, user_id, started_at)
@@ -71,43 +82,47 @@ export async function putImage(
       params: [uploadId, userId, now, userId],
     },
     {
-      sql: `INSERT INTO r2_cleanup_tasks (id, r2_key, user_id, created_at)
-            SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM account_deletions WHERE user_id = ?)`,
+      sql: `INSERT INTO r2_cleanup_tasks (id, r2_key, user_id, created_at, status)
+            SELECT ?, ?, ?, ?, 'pending' WHERE NOT EXISTS (SELECT 1 FROM account_deletions WHERE user_id = ?)`,
       params: [uploadId, key, userId, now, userId],
     },
   ]);
   if (started !== 1) throw new ImageError(401, 'account_deleted');
 
-  let present = false;
+  // PUT の完了を確認できたときだけ true。タイムアウト・失敗したPUTは、実際には進行中で後から着地するかもしれない
+  // ものとして扱う(リースの期限切れ・待機の打ち切りは書き込み終了の証拠にしない)。
+  let putSettled = present;
+  let putPromise: Promise<void> | null = null;
   try {
-    // 同じ内容が既にあれば本体は再アップロードしない(重複排除)。念のためR2に実在するか確認する
-    // R2 操作の待ち時間をリース内に抑える。超えたら失敗にするが、中断できない書き込みは後から着地し得るため、
-    // 掃除タスクは「リース + 猶予」が過ぎるまで消さない(sweepCleanupTasks)。
-    present = await withDeadline(store.head(key), UPLOAD_LEASE_MS);
-    if (!present) await withDeadline(store.put(key, input.bytes, contentType), UPLOAD_LEASE_MS);
+    if (!present) {
+      putPromise = store.put(key, input.bytes, contentType);
+      await withDeadline(putPromise, deadlineMs);
+      putSettled = true;
+    }
 
-    // R2 への保存が成功してから行を書く(行がある = 本体がある)。削除済みの同名は復活させる
+    // R2 への保存が成功してから行を書く(行がある = 本体がある)。削除済みの同名は復活させ、新しいキーを指す
     await driver.batch([
       {
         sql: `INSERT INTO image_objects
                 (user_id, file_name, sha256, size, content_type, r2_key, created_at, deleted_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-              ON CONFLICT (user_id, file_name) DO UPDATE SET deleted_at = NULL`,
+              ON CONFLICT (user_id, file_name) DO UPDATE SET deleted_at = NULL, r2_key = excluded.r2_key`,
         params: [userId, input.fileName, sha256, input.bytes.length, contentType, key, now],
       },
     ]);
   } catch (e) {
     // 削除中ならユーザー行の削除による外部キー違反などもここに来る。取り消したうえで 401 を返す
-    if (await rollbackIfDeleting(driver, store, userId, key, uploadId)) {
+    if (await rollbackIfDeleting(driver, store, userId, key, uploadId, putSettled)) {
       throw new ImageError(401, 'account_deleted');
     }
+    if (!putSettled) await abandonUpload(driver, store, key, uploadId, putPromise);
     throw e;
   }
   // 書き込み後に削除依頼が出ていたら、この書き込みを自分で取り消す(削除側の掃除より後に書いた分の回収)
-  if (await rollbackIfDeleting(driver, store, userId, key, uploadId)) {
+  if (await rollbackIfDeleting(driver, store, userId, key, uploadId, true)) {
     throw new ImageError(401, 'account_deleted');
   }
-  // 正常終了: 自分の記録だけを消す(同じキーの別アップロードのタスクには触れない)
+  // 正常終了(PUT完了を確認済み。キーは一意なので以後書き込まれない): 自分の記録だけを消す
   await driver.batch([
     { sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] },
     { sql: 'DELETE FROM r2_cleanup_tasks WHERE id = ?', params: [uploadId] },
@@ -131,9 +146,9 @@ async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
 /**
  * 削除依頼が出ていれば、書き込んだオブジェクトを取り消して true を返す(出ていなければ何もせず false)。
  *
- * - 掃除タスクは書き込み前に記録済み。ここでは新たに記録しないので、D1の読み取りが失敗しても追跡情報は失われない。
- *   削除依頼の確認に失敗したら握りつぶさず例外にする(アップロード記録とタスクは残り、500 になる)。
- *   後でそのユーザーの削除が行われれば、定期掃除がタスクから R2 のキーを回収する。
+ * - 掃除タスクは書き込み前に記録済み。D1の読み取りが失敗したら握りつぶさず例外にする(タスクは残り、500 になる)。
+ * - putSettled=false(PUTが終わったか不明)のときは、一度キーを削除するが掃除タスクは消さない(abandoned にする)。
+ *   遅れて着地しても、定期掃除が保持期間の間キーを繰り返し削除する。
  * - R2 の削除に失敗したらタスクを残し、ログを出して true を返す(呼び出し側は 401)。再試行は定期掃除が冪等に行う。
  */
 async function rollbackIfDeleting(
@@ -142,6 +157,7 @@ async function rollbackIfDeleting(
   userId: string,
   key: string,
   uploadId: string,
+  putSettled: boolean,
 ): Promise<boolean> {
   if (!(await isDeletionRequested(driver, userId))) return false;
   try {
@@ -153,7 +169,9 @@ async function rollbackIfDeleting(
   try {
     await driver.batch([
       { sql: 'DELETE FROM image_objects WHERE user_id = ? AND r2_key = ?', params: [userId, key] },
-      { sql: 'DELETE FROM r2_cleanup_tasks WHERE id = ?', params: [uploadId] },
+      putSettled
+        ? { sql: 'DELETE FROM r2_cleanup_tasks WHERE id = ?', params: [uploadId] }
+        : { sql: "UPDATE r2_cleanup_tasks SET status = 'abandoned' WHERE id = ?", params: [uploadId] },
       { sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] },
     ]);
   } catch (e) {
@@ -161,6 +179,29 @@ async function rollbackIfDeleting(
     console.error('[images] 取り消し後の記録削除に失敗しました', e instanceof Error ? e.message : 'unknown');
   }
   return true;
+}
+
+/**
+ * 完了を確認できなかったアップロードを abandoned にする。タスクは消さない(後から着地したPUTを定期掃除が回収する)。
+ * PUT が後から終わったら、その場でキーを削除する(一意なキーなので誰も参照しない。失敗しても掃除タスクが残る)。
+ */
+async function abandonUpload(
+  driver: SyncDriver,
+  store: ObjectStore,
+  key: string,
+  uploadId: string,
+  putPromise: Promise<void> | null,
+): Promise<void> {
+  putPromise?.then(
+    () => store.delete(key).catch(() => undefined),
+    () => undefined,
+  );
+  await driver
+    .batch([
+      { sql: "UPDATE r2_cleanup_tasks SET status = 'abandoned' WHERE id = ?", params: [uploadId] },
+      { sql: 'DELETE FROM image_uploads WHERE id = ?', params: [uploadId] },
+    ])
+    .catch((e) => console.error('[images] 中断の記録に失敗しました', e instanceof Error ? e.message : 'unknown'));
 }
 
 export async function getImage(
@@ -208,8 +249,8 @@ export async function deleteImage(
     },
   ]);
   const others = await driver.all<{ n: number }>({
-    sql: `SELECT COUNT(*) AS n FROM image_objects WHERE user_id = ? AND sha256 = ? AND deleted_at IS NULL`,
-    params: [userId, row.sha256],
+    sql: `SELECT COUNT(*) AS n FROM image_objects WHERE user_id = ? AND r2_key = ? AND deleted_at IS NULL`,
+    params: [userId, row.r2_key],
   });
   if ((others[0]?.n ?? 0) === 0) await store.delete(row.r2_key);
   return 'deleted';
