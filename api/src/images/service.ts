@@ -1,4 +1,4 @@
-import { isDeletionRequested } from '../account/service';
+import { isDeletionRequested, UPLOAD_LEASE_MS } from '../account/service';
 import type { SyncDriver } from '../sync/service';
 import { ImageError, kindFromFileName, validateUpload } from './validate';
 
@@ -81,8 +81,10 @@ export async function putImage(
   let present = false;
   try {
     // 同じ内容が既にあれば本体は再アップロードしない(重複排除)。念のためR2に実在するか確認する
-    present = await store.head(key);
-    if (!present) await store.put(key, input.bytes, contentType);
+    // R2 操作の待ち時間をリース内に抑える。超えたら失敗にするが、中断できない書き込みは後から着地し得るため、
+    // 掃除タスクは「リース + 猶予」が過ぎるまで消さない(sweepCleanupTasks)。
+    present = await withDeadline(store.head(key), UPLOAD_LEASE_MS);
+    if (!present) await withDeadline(store.put(key, input.bytes, contentType), UPLOAD_LEASE_MS);
 
     // R2 への保存が成功してから行を書く(行がある = 本体がある)。削除済みの同名は復活させる
     await driver.batch([
@@ -111,6 +113,19 @@ export async function putImage(
     { sql: 'DELETE FROM r2_cleanup_tasks WHERE id = ?', params: [uploadId] },
   ]);
   return { sha256, size: input.bytes.length, deduplicated: present };
+}
+
+/** ms 以内に終わらなければ拒否する(元の処理は中断できない。タイマーは必ず解除する) */
+async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ImageError(503, 'upload_timeout')), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

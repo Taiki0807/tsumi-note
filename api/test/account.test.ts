@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { bunDriver, createHarness, memoryStore, PASSWORD, registerAndLogin } from './harness';
-import { sweepCleanupTasks, sweepDeletions } from '../src/account/service';
+import { CLEANUP_GRACE_MS, sweepCleanupTasks, sweepDeletions, UPLOAD_LEASE_MS } from '../src/account/service';
 
 type H = ReturnType<typeof createHarness>;
 
@@ -202,7 +202,9 @@ const gate = () => {
   const promise = new Promise<void>((r) => (open = r));
   return { promise, open };
 };
-const tick = () => new Promise((r) => setTimeout(r, 20));
+/** 掃除タスクの保証期間(リース + 猶予)が過ぎた時刻 */
+const afterGuarantee = () => Date.now() + UPLOAD_LEASE_MS + CLEANUP_GRACE_MS + 1000;
+const tick =() => new Promise((r) => setTimeout(r, 20));
 const userObjects = (h: H, id: string) => [...h.objects.keys()].filter((k) => k.startsWith(`u/${id}/`));
 
 describe('アカウント削除と画像アップロードの競合', () => {
@@ -324,8 +326,11 @@ describe('アカウント削除と画像アップロードの競合', () => {
     expect(await sweepCleanupTasks(drv, failing)).toBe(0);
     expect(count(h, 'r2_cleanup_tasks')).toBe(1);
     const idB = (h.sqlite.query('SELECT id FROM user WHERE email = ?').get('b@example.com') as { id: string }).id;
-    expect(await sweepCleanupTasks(drv, memoryStore(h.objects))).toBe(1);
-    expect(await sweepCleanupTasks(drv, memoryStore(h.objects))).toBe(0); // 冪等
+    expect(await sweepCleanupTasks(drv, memoryStore(h.objects))).toBe(0); // R2は消えるが、保証期間中はタスクを残す
+    expect(userObjects(h, idA)).toEqual([]);
+    expect(count(h, 'r2_cleanup_tasks')).toBe(1);
+    expect(await sweepCleanupTasks(drv, memoryStore(h.objects), afterGuarantee())).toBe(1);
+    expect(await sweepCleanupTasks(drv, memoryStore(h.objects), afterGuarantee())).toBe(0); // 冪等
     expect(userObjects(h, idA)).toEqual([]);
     expect(userObjects(h, idB).length).toBe(1);
     expect(count(h, 'r2_cleanup_tasks')).toBe(0);
@@ -353,10 +358,39 @@ describe('アカウント削除と画像アップロードの競合', () => {
     expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(2); // 追跡情報は失われていない
 
     // D1復旧後の定期掃除で回収される。他アカウントの画像は残る。再実行しても結果は同じ
-    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(2);
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(0);
+    expect(userObjects(h, idA)).toEqual([]);
+    expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(2); // 保証期間中はタスクを残す
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), afterGuarantee())).toBe(2);
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), afterGuarantee())).toBe(0);
+    expect(userObjects(h, idB).length).toBe(1);
+    expect(count(h, 'r2_cleanup_tasks')).toBe(0);
+  });
+
+  test('リース失効後の掃除でもタスクは消えず、停止していたPUTが後から着地しても回収される(D1読み取り障害つき)', async () => {
+    const { h, a, idA, idB } = await setup();
+    const g = gate();
+    h.faults.beforePut = g.promise;
+    const pending = upload(h, a, 'zombie.png', png(50));
+    await tick();
+    h.sqlite.run('UPDATE image_uploads SET started_at = 0'); // lease 失効
+    expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+    // 掃除が先に走る。PUT は未完了かもしれないのでタスクは消さない
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(0);
+    expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(1);
+
+    h.faults.readDeletion = true;
+    g.open(); // 停止していたPUTが再開して書き込む
+    expect((await pending).status).toBe(500);
+    h.faults.readDeletion = false;
+    h.faults.beforePut = null;
+    expect(userObjects(h, idA).length).toBe(1);
+
+    // D1復旧後の次回の掃除(Workers 再起動相当)でR2から消える。他アカウントは残る
     expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(0);
     expect(userObjects(h, idA)).toEqual([]);
     expect(userObjects(h, idB).length).toBe(1);
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), afterGuarantee())).toBe(1);
     expect(count(h, 'r2_cleanup_tasks')).toBe(0);
   });
 
@@ -386,7 +420,7 @@ describe('アカウント削除と画像アップロードの競合', () => {
     h.objects.delete = orig;
     h.faults.beforePut = null;
     expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(1);
-    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(1);
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), afterGuarantee())).toBe(1);
     expect(count(h, 'r2_cleanup_tasks')).toBe(0);
   });
 
@@ -429,7 +463,7 @@ describe('アカウント削除と画像アップロードの競合', () => {
     expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(3);
 
     // Workers 再起動相当: 新しいドライバ・ストアで掃除しても同じ結果になる
-    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects))).toBe(3);
+    expect(await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), afterGuarantee())).toBe(3);
     expect(userObjects(h, idA)).toEqual([]);
     expect(userObjects(h, idB).length).toBe(2);
     expect(count(h, 'r2_cleanup_tasks')).toBe(0);

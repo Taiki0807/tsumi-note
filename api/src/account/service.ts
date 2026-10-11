@@ -10,6 +10,12 @@ export const DELETE_ATTEMPT_MAX = 5;
 /** 画像アップロードの有効期間。これを過ぎた記録は異常終了とみなし、削除の完了を妨げない */
 export const UPLOAD_LEASE_MS = 10 * 60 * 1000;
 
+/**
+ * 掃除タスクを消せるまでの猶予(リース + これ)。アップロードは UPLOAD_LEASE_MS で打ち切るが、中断できない R2 書き込みが
+ * 遅れて着地し得るため、この期間は R2 のキーを繰り返し削除し、タスクを残す。
+ */
+export const CLEANUP_GRACE_MS = 60 * 60 * 1000;
+
 /** 進行中のアップロードがあるため削除を完了できない(アップロードの終了後に再試行で完了する) */
 export class DeletionPendingError extends Error {
   constructor() {
@@ -164,19 +170,23 @@ export async function sweepCleanupTasks(
       },
     ])
     .catch((e) => console.error('[account] 古い掃除タスクの整理に失敗しました', e instanceof Error ? e.message : 'unknown'));
-  const rows = await driver.all<{ id: string; r2_key: string; user_id: string }>({
-    sql: `SELECT t.id, t.r2_key, t.user_id FROM r2_cleanup_tasks t
+  const rows = await driver.all<{ id: string; r2_key: string; user_id: string; created_at: number }>({
+    sql: `SELECT t.id, t.r2_key, t.user_id, t.created_at FROM r2_cleanup_tasks t
           WHERE EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = t.user_id)
           ORDER BY t.created_at LIMIT 100`,
     params: [],
   });
   let done = 0;
-  for (const { id, r2_key, user_id } of rows) {
+  for (const { id, r2_key, user_id, created_at } of rows) {
     if (!r2_key.startsWith(r2PrefixFor(user_id))) continue;
     try {
       await store.delete(r2_key);
-      await driver.batch([{ sql: 'DELETE FROM r2_cleanup_tasks WHERE id = ?', params: [id] }]);
-      done++;
+      // リース失効 = 書き込み完了ではない。停止していた書き込みが後から着地し得るので、
+      // 保証期間(リース + 猶予)が過ぎるまでタスクは消さず、次回以降も同じキーを削除する(冪等)
+      if (now >= created_at + UPLOAD_LEASE_MS + CLEANUP_GRACE_MS) {
+        await driver.batch([{ sql: 'DELETE FROM r2_cleanup_tasks WHERE id = ?', params: [id] }]);
+        done++;
+      }
     } catch (e) {
       console.error('[account] 掃除タスクの実行に失敗しました', e instanceof Error ? e.message : 'unknown');
       await driver
