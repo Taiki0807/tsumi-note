@@ -14,7 +14,7 @@ export const UPLOAD_LEASE_MS = 10 * 60 * 1000;
  * 掃除タスクの保持期間(リース + これ)。アップロードは UPLOAD_LEASE_MS で待機を打ち切るが、R2 の書き込み自体は
  * 中断できず、いつ終わるかの上限は保証できない。そのため「待てば終わっているはず」には依存せず、
  * この期間は R2 のキー(タスク)とアカウントのプレフィックス(sweepDeletions)を繰り返し削除し続ける。
- * 保持期間を超えて着地する書き込みは回収できない(残存リスク。docs/PHASE8_DESIGN.md §12.3.6)。
+ * 掃除タスクの保持はこの期間で終わるが、削除済みアカウントのプレフィックス再走査(sweepDeletions)は打ち切らず間隔を空けて続ける。
  */
 export const CLEANUP_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 /** 生きているアカウントのタスクを処理し始める、リース終了からの余白(コミット中のアップロードを消さないため) */
@@ -132,23 +132,52 @@ export async function deleteAccount(
   }
 }
 
-/** user 行は消えたが R2 の掃除が済んでいない削除を完了させる(定期実行)。完了した件数を返す */
+/** 完了済みの削除の再走査間隔。経過が長いほど間隔を空け、コストを抑えつつ打ち切らない */
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RESCAN_FAST_AGE_MS = 7 * DAY_MS; // 〜7日: 毎回
+const RESCAN_MID_AGE_MS = 90 * DAY_MS; // 〜90日: 週1回
+const RESCAN_MID_INTERVAL_MS = 7 * DAY_MS;
+const RESCAN_SLOW_INTERVAL_MS = 30 * DAY_MS; // それ以降: 月1回
+
+/**
+ * user 行は消えたが R2 の掃除が済んでいない削除を完了させ、完了済みの削除済みアカウントのプレフィックスを再走査する(定期実行)。
+ * 完了した件数を返す。
+ *
+ * 未完了のR2書き込みがいつまでに終わるかの上限は保証できないため、再走査は「一定期間で打ち切る」ことをしない。
+ * 代わりに間隔を段階的に空ける(〜7日は毎回、〜90日は週1回、以降は月1回)。1回の実行は最終走査時刻の古い順に50件までで、
+ * 1件あたり list 1回(該当があれば delete も)。運用コストはアカウント数に比例して増えるが、1回あたりは一定に抑えられる。
+ */
 export async function sweepDeletions(driver: SyncDriver, store: ObjectStore, now: number): Promise<number> {
-  // 未完了の削除に加え、完了済みでも保持期間中は R2 のプレフィックスを再走査する(遅れて着地した書き込みの回収)
   const rows = await driver.all<{ user_id: string; completed_at: number | null }>({
     sql: `SELECT d.user_id, d.completed_at FROM account_deletions d
-          WHERE (d.completed_at IS NULL OR d.requested_at > ?)
-            AND NOT EXISTS (SELECT 1 FROM user u WHERE u.id = d.user_id)
-          ORDER BY d.requested_at LIMIT 50`,
-    params: [now - UPLOAD_LEASE_MS - CLEANUP_GRACE_MS],
+          WHERE NOT EXISTS (SELECT 1 FROM user u WHERE u.id = d.user_id)
+            AND (d.completed_at IS NULL OR d.last_scanned_at IS NULL OR d.last_scanned_at <= ? - CASE
+                   WHEN ? - d.requested_at <= ? THEN 0
+                   WHEN ? - d.requested_at <= ? THEN ?
+                   ELSE ? END)
+          ORDER BY COALESCE(d.last_scanned_at, 0), d.requested_at LIMIT 50`,
+    params: [
+      now,
+      now,
+      RESCAN_FAST_AGE_MS,
+      now,
+      RESCAN_MID_AGE_MS,
+      RESCAN_MID_INTERVAL_MS,
+      RESCAN_SLOW_INTERVAL_MS,
+    ],
   });
   let done = 0;
   for (const { user_id, completed_at } of rows) {
     if (completed_at !== null) {
-      // 完了済み: 再走査だけ(失敗は次回に再試行)
-      await store
-        .deletePrefix(r2PrefixFor(user_id))
-        .catch((e) => console.error('[account] 再走査に失敗しました', e instanceof Error ? e.message : 'unknown'));
+      // 完了済み: 再走査だけ。成功したときだけ最終走査時刻を進める(失敗は次回に再試行)
+      try {
+        await store.deletePrefix(r2PrefixFor(user_id));
+        await driver.batch([
+          { sql: 'UPDATE account_deletions SET last_scanned_at = ? WHERE user_id = ?', params: [now, user_id] },
+        ]);
+      } catch (e) {
+        console.error('[account] 再走査に失敗しました', e instanceof Error ? e.message : 'unknown');
+      }
       continue;
     }
     // 進行中のアップロードがあれば完了にせず次回へ回す(失効後に再掃除して完了する)
@@ -156,7 +185,10 @@ export async function sweepDeletions(driver: SyncDriver, store: ObjectStore, now
     await store.deletePrefix(r2PrefixFor(user_id));
     await driver.batch([
       { sql: 'DELETE FROM image_uploads WHERE user_id = ?', params: [user_id] },
-      { sql: 'UPDATE account_deletions SET completed_at = ? WHERE user_id = ?', params: [now, user_id] },
+      {
+        sql: 'UPDATE account_deletions SET completed_at = ?, last_scanned_at = ? WHERE user_id = ?',
+        params: [now, now, user_id],
+      },
     ]);
     done++;
   }

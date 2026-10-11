@@ -100,8 +100,17 @@ export async function putImage(
       putSettled = true;
     }
 
-    // R2 への保存が成功してから行を書く(行がある = 本体がある)。削除済みの同名は復活させ、新しいキーを指す
+    // R2 への保存が成功してから行を書く(行がある = 本体がある)。削除済みの同名は復活させ、新しいキーを指す。
+    // 同じ (user_id, file_name) への並行PUTでは、行が参照できるキーは最後の1つだけ。上書きで参照を失う古いキーは、
+    // 同じバッチ(D1では原子的)で先に掃除タスクとして記録する。これで「参照されている」か「タスクで追跡されている」の
+    // どちらかが常に成り立つ。自分のタスクの削除は、このバッチの後(下)で行う。
     await driver.batch([
+      {
+        sql: `INSERT INTO r2_cleanup_tasks (id, r2_key, user_id, created_at, status)
+              SELECT ?, r2_key, user_id, ?, 'abandoned' FROM image_objects
+              WHERE user_id = ? AND file_name = ? AND r2_key != ?`,
+        params: [crypto.randomUUID(), now, userId, input.fileName, key],
+      },
       {
         sql: `INSERT INTO image_objects
                 (user_id, file_name, sha256, size, content_type, r2_key, created_at, deleted_at)

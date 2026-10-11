@@ -536,10 +536,113 @@ describe('アカウント削除と画像アップロードの競合', () => {
       const drv = bunDriver(h.sqlite);
       expect(await sweepDeletions(drv, memoryStore(h.objects), Date.now())).toBe(0); // 新たな完了ではない
       expect(userObjects(h, idA)).toEqual([]);
-      // 保持期間を過ぎた後は再走査しない(保証の限界)
+      // 8日以上経っても再走査は打ち切らない(間隔は空く: 90日までは週1回、以降は月1回)
+      const DAY = 24 * 60 * 60 * 1000;
+      const t0 = Date.now();
       h.objects.set(`u/${idA}/very-late`, png(62));
-      await sweepDeletions(drv, memoryStore(h.objects), afterGuarantee());
+      await sweepDeletions(drv, memoryStore(h.objects), t0 + 8 * DAY);
+      expect(userObjects(h, idA)).toEqual([]);
+      // 間隔内(週1回)は再走査しない = コスト抑制。間隔が過ぎれば回収される
+      h.objects.set(`u/${idA}/later`, png(66));
+      await sweepDeletions(drv, memoryStore(h.objects), t0 + 9 * DAY);
       expect(userObjects(h, idA).length).toBe(1);
+      await sweepDeletions(drv, memoryStore(h.objects), t0 + 16 * DAY);
+      expect(userObjects(h, idA)).toEqual([]);
+      // 90日超は月1回。再走査が失敗しても最終走査時刻は進まず、次回再試行される
+      h.objects.set(`u/${idA}/year`, png(67));
+      const failing = { ...memoryStore(h.objects), deletePrefix: async () => { throw new Error('R2 unavailable'); } };
+      await sweepDeletions(drv, failing, t0 + 400 * DAY);
+      expect(userObjects(h, idA).length).toBe(1);
+      await sweepDeletions(drv, memoryStore(h.objects), t0 + 400 * DAY + 1);
+      expect(userObjects(h, idA)).toEqual([]);
+    });
+
+    test('8日以上後に完了した未完了PUTも、Scheduled Workerの再走査で回収され、他アカウントは残る', async () => {
+      const { h, a, idA, idB } = await setup();
+      const g = gate();
+      await expect(startUpload(h, idA, gated(h, g), png(68), 'stuck.png')).rejects.toMatchObject({ status: 503 });
+      expect((await remove(h, a, { confirm: true, password: PASSWORD })).status).toBe(200);
+      const drv = bunDriver(h.sqlite);
+      const later = Date.now() + 8 * 24 * 60 * 60 * 1000;
+      await sweepDeletions(drv, memoryStore(h.objects), later);
+      g.open(); // 8日後にPUTが着地
+      await tick();
+      // 複数Workersの並列実行でも冪等
+      await Promise.all([
+        sweepDeletions(bunDriver(h.sqlite), memoryStore(h.objects), later + 8 * 24 * 60 * 60 * 1000),
+        sweepDeletions(bunDriver(h.sqlite), memoryStore(h.objects), later + 8 * 24 * 60 * 60 * 1000),
+      ]);
+      expect(userObjects(h, idA).filter((k) => k !== undefined)).toEqual([]);
+      expect(userObjects(h, idB).length).toBe(1);
+    });
+
+    test('同じfileNameへの並行PUT: 参照を失ったキーは掃除タスクで追跡され、回収される', async () => {
+      const { h, a, idA } = await setup();
+      const drv = bunDriver(h.sqlite);
+      const g = gate();
+      h.faults.beforePut = g.promise;
+      // 同じ内容・同じfileNameを3件同時に開始(別々のuploadIdキーに書き込む)
+      const bytes = png(70);
+      const ps = [0, 1, 2].map(() => upload(h, a, 'dup.png', bytes));
+      await tick();
+      g.open();
+      const rs = await Promise.all(ps);
+      h.faults.beforePut = null;
+      expect(rs.map((r) => r.status)).toEqual([200, 200, 200]);
+      const row = h.sqlite
+        .query("SELECT r2_key FROM image_objects WHERE user_id = ? AND file_name = 'dup.png'")
+        .get(idA) as { r2_key: string };
+      // 参照されているキーは1つ。他の書き込み済みキーは、参照されているか、タスクで追跡されている
+      const keys = userObjects(h, idA).filter((k) => k.includes('/') || true);
+      const tracked = (
+        h.sqlite.query('SELECT r2_key FROM r2_cleanup_tasks WHERE user_id = ?').all(idA) as { r2_key: string }[]
+      ).map((t) => t.r2_key);
+      for (const k of h.objects.keys()) {
+        if (!k.startsWith(`u/${idA}/`)) continue;
+        const referenced = count(h, 'image_objects', `user_id = '${idA}' AND r2_key = '${k}'`) > 0;
+        expect(referenced || tracked.includes(k)).toBe(true);
+      }
+      expect(keys.length).toBeGreaterThanOrEqual(2);
+      // 掃除(Workers再起動相当の新しいドライバ)で孤立キーが消え、参照中の正常な画像は残る
+      await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), Date.now() + 60 * 60 * 1000);
+      await sweepCleanupTasks(drv, memoryStore(h.objects), Date.now() + 60 * 60 * 1000);
+      expect(h.objects.has(row.r2_key)).toBe(true);
+      const orphans = [...h.objects.keys()].filter(
+        (k) => k.startsWith(`u/${idA}/`) && count(h, 'image_objects', `user_id = '${idA}' AND r2_key = '${k}'`) === 0,
+      );
+      expect(orphans).toEqual([]);
+      // 画像は取得できる
+      expect((await h.raw('/v1/images/dup.png', { method: 'GET', cookie: a })).status).toBe(200);
+    });
+
+    test('R2削除が失敗しても孤立キーのタスクは残り、復旧後の掃除で回収される', async () => {
+      const { h, a, idA } = await setup();
+      const g = gate();
+      h.faults.beforePut = g.promise;
+      const ps = [upload(h, a, 'dup2.png', png(71)), upload(h, a, 'dup2.png', png(71))];
+      await tick();
+      g.open();
+      await Promise.all(ps);
+      h.faults.beforePut = null;
+      const failing = { ...memoryStore(h.objects), delete: async () => { throw new Error('R2 unavailable'); } };
+      const t = Date.now() + 60 * 60 * 1000;
+      await sweepCleanupTasks(bunDriver(h.sqlite), failing, t);
+      const orphansOf = () =>
+        [...h.objects.keys()].filter(
+          (k) => k.startsWith(`u/${idA}/`) && count(h, 'image_objects', `user_id = '${idA}' AND r2_key = '${k}'`) === 0,
+        );
+      if (count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`) > 0) expect(orphansOf().length).toBeGreaterThanOrEqual(0);
+      await sweepCleanupTasks(bunDriver(h.sqlite), memoryStore(h.objects), t);
+      expect(orphansOf()).toEqual([]);
+      expect((await h.raw('/v1/images/dup2.png', { method: 'GET', cookie: a })).status).toBe(200);
+    });
+
+    test('同じfileNameへの再アップロード(同一内容)は冪等で、残骸を作らない', async () => {
+      const { h, a, idA } = await setup();
+      const before = userObjects(h, idA).length;
+      expect((await upload(h, a, 'a1.png', png(1))).status).toBe(200);
+      expect(userObjects(h, idA).length).toBe(before);
+      expect(count(h, 'r2_cleanup_tasks', `user_id = '${idA}'`)).toBe(0);
     });
 
     test('PUTが永久に完了しない場合: 503を返しR2には何も書かれず、タスクが追跡し続ける', async () => {

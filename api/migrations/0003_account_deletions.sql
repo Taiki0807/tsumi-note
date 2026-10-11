@@ -5,5 +5,6 @@
 CREATE TABLE `account_deletions` (
 	`user_id` text PRIMARY KEY NOT NULL,
 	`requested_at` integer NOT NULL,
-	`completed_at` integer
+	`completed_at` integer,
+	`last_scanned_at` integer
 );
