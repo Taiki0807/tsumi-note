@@ -47,6 +47,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...(config as ExpoConfig),
+
+    plugins: [
+      ...(config.plugins ?? []),
+      'expo-image',
+    ],
+
     ios: {
       ...config.ios,
       infoPlist: {
