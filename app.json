@@ -25,7 +25,9 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "ノートに挿入する画像を選ぶために、写真ライブラリへアクセスします。"
+          "photosPermission": "ノートに挿入する画像を選ぶために、写真ライブラリへアクセスします。",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       [

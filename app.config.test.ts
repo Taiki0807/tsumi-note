@@ -82,3 +82,14 @@ describe('app.config', () => {
     expect(cfg.scheme).toBe('tsumi-note');
   });
 });
+
+describe('app.json のマイク/カメラ権限', () => {
+  it('expo-image-picker はマイク・カメラ権限を無効化している', () => {
+    const app = require('./app.json') as { expo: { plugins: unknown[] } };
+    const entry = app.expo.plugins.find((p) => Array.isArray(p) && p[0] === 'expo-image-picker') as
+      | [string, Record<string, unknown>]
+      | undefined;
+    expect(entry?.[1].microphonePermission).toBe(false);
+    expect(entry?.[1].cameraPermission).toBe(false);
+  });
+});
