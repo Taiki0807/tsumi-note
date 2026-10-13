@@ -141,11 +141,6 @@ export function CreateAccountScreen() {
           ))}
         </View>
 
-        {/* Figma に無い追加(未デザイン): 同期・引き継ぎは後続PRで有効になるため、現時点の状態を明示する */}
-        <Notice tone="info">
-          アカウントを作成しても、この端末の学習データは削除されません。端末間の同期とデータの引き継ぎは、今後のアップデートで有効になります。
-        </Notice>
-
         <View style={{ gap: 10 }}>
           <ProviderButton
             provider="apple"

@@ -4,6 +4,7 @@ import { Pressable, Text, View } from 'react-native';
 import { Button } from '@/components/form-ui';
 import { fontFamily, radius, typography, useTheme } from '@/design';
 
+import { LocalDataDeletionSection } from './local-data-deletion-section';
 import { openLegalUrl, PRIVACY_URL, TERMS_URL } from './legal-links';
 import { SettingsScaffold } from './settings-ui';
 import { useDataExport } from './use-settings';
@@ -96,6 +97,7 @@ export function PrivacyScreen() {
           disabled={busy}
         />
       </View>
+      <LocalDataDeletionSection />
       <View
         style={{
           paddingHorizontal: 20,

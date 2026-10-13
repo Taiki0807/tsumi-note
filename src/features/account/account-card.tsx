@@ -240,7 +240,7 @@ export function AccountCardView({
           </Text>
         </Pressable>
         <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
-          すべての端末から記録が消え、元に戻せません
+          クラウドの記録が消え、元に戻せません
         </Text>
       </View>
 
