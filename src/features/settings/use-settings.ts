@@ -4,9 +4,10 @@ import { Appearance, AppState } from 'react-native';
 
 import { useRepositories } from '@/db/database-provider';
 import type { Goal } from '@/db/repositories';
-import type { ReminderSettings } from '@/domain/app-settings';
+import type { ReminderSettings, TimerAlertSettings } from '@/domain/app-settings';
 import type { GoalInput } from '@/domain/goal';
 import type { TimerSettings } from '@/features/timer/timer-logic';
+import { configureTimerAlerts } from '@/features/timer/timer-notifications';
 
 import { shareExport } from './export-data';
 import { reminderScheduler, type ReminderResult } from './reminder-notifications';
@@ -16,7 +17,9 @@ import {
   loadDarkMode,
   loadMyPageSummary,
   loadReminder,
+  loadTimerAlerts,
   restoreReminder,
+  saveTimerAlerts,
   saveDarkMode,
   saveGoal,
   loadTimerSettings,
@@ -32,6 +35,7 @@ export function useApplyStoredSettings(): void {
   const repos = useRepositories();
   useEffect(() => {
     const dark = loadDarkMode(repos);
+    configureTimerAlerts(loadTimerAlerts(repos));
     // 'unspecified' hands control back to the system; the existing useTheme/useColorScheme follows it.
     Appearance.setColorScheme(dark === null ? 'unspecified' : dark ? 'dark' : 'light');
     void restoreReminder(repos, reminderScheduler);
@@ -92,6 +96,17 @@ export function useTimerSettings() {
     }, [repos]),
   );
   return { settings, update: (next: TimerSettings) => setSettings(saveTimerSettings(repos, next)) };
+}
+
+/** タイマー終了時の通知音 / バイブレーション。The timer tab reads the same storage and applies it on focus. */
+export function useTimerAlerts() {
+  const repos = useRepositories();
+  const [alerts, setAlerts] = useState<TimerAlertSettings>(() => loadTimerAlerts(repos));
+  const update = (next: TimerAlertSettings) => {
+    setAlerts(saveTimerAlerts(repos, next));
+    configureTimerAlerts(next);
+  };
+  return { alerts, update };
 }
 
 export function useReminderSettings() {

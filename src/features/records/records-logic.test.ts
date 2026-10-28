@@ -207,7 +207,7 @@ describe('formatting', () => {
   });
 
   it('keeps the chart axis on even whole hours, at least 2h', () => {
-    const days = (hours: number) => [{ dayStart: 0, weekdayIndex: 0, seconds: hours * 3600 }];
+    const days = (hours: number) => [{ dayStart: 0, weekdayIndex: 0, seconds: hours * 3600, segments: [] }];
     expect(chartMaxHours(days(0))).toBe(2);
     expect(chartMaxHours(days(1.25))).toBe(2);
     expect(chartMaxHours(days(2.5))).toBe(4);
@@ -290,7 +290,10 @@ describe('today stats for the timer screen (shared aggregation)', () => {
     const { repos, storage } = setup();
     const s = { ...DEFAULT_TIMER_SETTINGS, rounds: 1 };
     const t0 = local(2026, 9, 8, 9);
-    const done = advance(start(createIdleState(s), s, t0, () => 'run-1'), t0 + 25 * MIN);
+    const done = advance(
+      start(createIdleState(s), s, t0, () => 'run-1'),
+      t0 + 25 * MIN,
+    );
     storage.recordCompletedFocus(done.completedFocus);
     storage.recordCompletedFocus(done.completedFocus); // idempotent
 

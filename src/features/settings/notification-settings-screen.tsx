@@ -6,12 +6,13 @@ import { fontFamily, radius, typography, useTheme } from '@/design';
 import { formatReminderTime, parseReminderTime } from '@/domain/app-settings';
 
 import { SettingsScaffold } from './settings-ui';
-import { useReminderSettings } from './use-settings';
+import { useReminderSettings, useTimerAlerts } from './use-settings';
 
 /** PRODUCT_SPEC §17 通知: 毎日の学習リマインダー + 通知時刻. Not designed in Figma → existing components. */
 export function NotificationSettingsScreen() {
   const colors = useTheme();
   const { reminder, update, sync } = useReminderSettings();
+  const { alerts: timerAlerts, update: updateTimerAlerts } = useTimerAlerts();
   const [timeText, setTimeText] = useState(formatReminderTime(reminder));
   const [message, setMessage] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
@@ -128,6 +129,81 @@ export function NotificationSettingsScreen() {
           タイマーの終了通知とは別に管理されます。リマインダーを変更してもタイマーの通知には影響しません。
         </Text>
       </View>
+      <View
+        style={{
+          gap: 14,
+          padding: 20,
+          borderRadius: radius.lg,
+          borderWidth: 1,
+          borderColor: colors.divider,
+          backgroundColor: colors.surface,
+        }}
+      >
+        <Text
+          style={{
+            fontFamily: fontFamily.extraBold,
+            fontSize: 17,
+            lineHeight: 26,
+            color: colors.textPrimary,
+          }}
+        >
+          タイマー終了時
+        </Text>
+        <AlertRow
+          label="通知音"
+          description="集中・休憩の終了時に音でお知らせします"
+          value={timerAlerts.sound}
+          onChange={(sound) => updateTimerAlerts({ ...timerAlerts, sound })}
+        />
+        <AlertRow
+          label="バイブレーション"
+          description="アプリを開いているときに振動でお知らせします"
+          value={timerAlerts.vibration}
+          onChange={(vibration) => updateTimerAlerts({ ...timerAlerts, vibration })}
+        />
+        <Text
+          style={{
+            fontFamily: fontFamily.regular,
+            ...typography.caption,
+            lineHeight: 18,
+            color: colors.textSecondary,
+          }}
+        >
+          バックグラウンドでは通知として届きます。音や振動はiOSの通知設定・マナーモード・集中モードに従います。
+        </Text>
+      </View>
     </SettingsScaffold>
+  );
+}
+
+function AlertRow({
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  value: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const colors = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: fontFamily.bold, ...typography.body, color: colors.textPrimary }}>
+          {label}
+        </Text>
+        <Text style={{ fontFamily: fontFamily.regular, ...typography.caption, color: colors.textSecondary }}>
+          {description}
+        </Text>
+      </View>
+      <Switch
+        accessibilityLabel={label}
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ true: colors.primary, false: colors.border }}
+      />
+    </View>
   );
 }

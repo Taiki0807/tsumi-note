@@ -12,13 +12,15 @@ type Props = {
   selectedId: string | null;
   onSelect: (folderId: string | null) => void;
   onClose: () => void;
+  /** Shows a 「新しいフォルダー」 row. The caller closes this sheet and opens the create form. */
+  onCreate?: () => void;
 };
 
 /**
  * Folder picker for the timer (Figma 01 › Folder selector opens it). The Figma file has no frame for
  * the list itself, so it reuses the existing bottom-sheet motion and tokens. 「未分類」 = no folder.
  */
-export function FolderPickerSheet({ visible, folders, selectedId, onSelect, onClose }: Props) {
+export function FolderPickerSheet({ visible, folders, selectedId, onSelect, onClose, onCreate }: Props) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const { mounted, panHandlers, backdropStyle, sheetStyle } = useSheetMotion({ visible, onClose });
@@ -105,6 +107,34 @@ export function FolderPickerSheet({ visible, folders, selectedId, onSelect, onCl
                 </Pressable>
               );
             })}
+            {onCreate && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="新しいフォルダーを作成"
+                onPress={onCreate}
+                style={{
+                  height: 48,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  paddingHorizontal: 16,
+                  borderRadius: radius.full,
+                  backgroundColor: colors.primarySoft,
+                }}
+              >
+                <Icon name="plus" size={18} color={colors.primary} />
+                <Text
+                  style={{
+                    fontFamily: fontFamily.extraBold,
+                    fontSize: 15,
+                    lineHeight: 24,
+                    color: colors.primary,
+                  }}
+                >
+                  新しいフォルダー
+                </Text>
+              </Pressable>
+            )}
           </ScrollView>
         </Animated.View>
       </View>

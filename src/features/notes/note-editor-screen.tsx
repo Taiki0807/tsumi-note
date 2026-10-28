@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, EmptyState, IconButton } from '@/components/form-ui';
+import { Button, ConfirmDeleteSheet, EmptyState, IconButton } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, typography, useTheme } from '@/design';
 import { removeSegmentLine, splitEditorSegments, toggleChecklistLine } from '@/domain/markdown';
@@ -224,20 +224,16 @@ export function NoteEditorScreen() {
     setEditingBody(false);
   };
 
-  const confirmDelete = () =>
-    Alert.alert('このノートを削除しますか？', noteDisplayTitle(title), [
-      { text: 'キャンセル', style: 'cancel' },
-      {
-        text: '削除',
-        style: 'destructive',
-        onPress: () => {
-          clearTimeout(timer.current);
-          dirty.current = false;
-          if (noteId.current) editor.deleteNote(noteId.current);
-          router.back();
-        },
-      },
-    ]);
+  // Same confirmation sheet as the folder / question deletes (Figma 06b / 08c).
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmDelete = () => setConfirmingDelete(true);
+  const deleteNow = () => {
+    setConfirmingDelete(false);
+    clearTimeout(timer.current);
+    dirty.current = false;
+    if (noteId.current) editor.deleteNote(noteId.current);
+    router.back();
+  };
 
   const openMenu = () => {
     const id = noteId.current;
@@ -366,7 +362,9 @@ export function NoteEditorScreen() {
               }}
             >
               <Icon name="folder" size={16} color={colors.textPrimary} strokeWidth={1.8} />
-              <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: folderTone.label }}>
+              <Text
+                style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: folderTone.label }}
+              >
                 {folder?.name ?? '未分類'}
               </Text>
             </Pressable>
@@ -574,6 +572,13 @@ export function NoteEditorScreen() {
         selectedId={folderId}
         onSelect={updateFolder}
         onClose={() => setPickingFolder(false)}
+      />
+      <ConfirmDeleteSheet
+        visible={confirmingDelete}
+        title="このノートを削除しますか？"
+        message={noteDisplayTitle(title)}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={deleteNow}
       />
     </KeyboardAvoidingView>
   );

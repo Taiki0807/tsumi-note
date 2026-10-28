@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BottomSheet, Button, IconButton, TextField } from '@/components/form-ui';
+import { Button, IconButton, TextField } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
-import { fontFamily, radius, typography, useTheme } from '@/design';
+import { fontFamily, layout, radius, typography, useTheme } from '@/design';
 import { isBlank, ValidationError } from '@/domain/validation';
 
 type Props = {
@@ -17,12 +18,40 @@ type Props = {
   onClose: () => void;
 };
 
-/** Figma 09 問題を作成 (bottom sheet). Editing / deleting reuse it (not designed in Figma). */
+/**
+ * Figma 09 問題を作成, shown full screen (v1.1.0) so the 問題 / 答え inputs use all the available space
+ * instead of two small boxes. Editing / deleting reuse it (not designed in Figma).
+ */
 export function QuestionFormSheet({ visible, ...rest }: Props) {
+  const colors = useTheme();
+  const insets = useSafeAreaInsets();
   return (
-    <BottomSheet visible={visible} onClose={rest.onClose}>
-      {visible && <QuestionForm {...rest} />}
-    </BottomSheet>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={rest.onClose}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1, backgroundColor: colors.surface }}
+      >
+        <View
+          style={{
+            flex: 1,
+            gap: 16,
+            alignSelf: 'center',
+            width: '100%',
+            maxWidth: layout.contentMaxWidth,
+            paddingTop: Math.max(insets.top, 16) + 8,
+            paddingHorizontal: 24,
+            paddingBottom: Math.max(insets.bottom, 16),
+          }}
+        >
+          {visible && <QuestionForm {...rest} />}
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -98,6 +127,7 @@ function QuestionForm({ folderName, initial, onSubmit, onDelete, onClose }: Omit
           setError(null);
         }}
         multiline
+        fill
       />
       <TextField
         label="答え"
@@ -108,6 +138,7 @@ function QuestionForm({ folderName, initial, onSubmit, onDelete, onClose }: Omit
           setError(null);
         }}
         multiline
+        fill
       />
       {error && (
         <Text

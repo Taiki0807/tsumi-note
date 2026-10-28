@@ -1,10 +1,10 @@
 import { router } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
-import { EmptyState, IconButton, SearchField } from '@/components/form-ui';
+import { ConfirmDeleteSheet, EmptyState, IconButton, SearchField } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 
@@ -96,11 +96,9 @@ export function NoteListScreen() {
   useEffect(() => sweepImages(), [sweepImages]);
   const searching = list.query.trim().length > 0;
 
-  const confirmDelete = (row: NoteRow) =>
-    Alert.alert('このノートを削除しますか？', noteDisplayTitle(row.note.title), [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: '削除', style: 'destructive', onPress: () => list.deleteNote(row.note.id) },
-    ]);
+  // Same confirmation sheet as the folder / question deletes (Figma 06b / 08c).
+  const [deleting, setDeleting] = useState<NoteRow | null>(null);
+  const confirmDelete = (row: NoteRow) => setDeleting(row);
 
   const openMenu = (row: NoteRow) =>
     Alert.alert(noteDisplayTitle(row.note.title), undefined, [
@@ -255,6 +253,16 @@ export function NoteListScreen() {
           </View>
         )}
       </ScrollView>
+      <ConfirmDeleteSheet
+        visible={deleting !== null}
+        title="このノートを削除しますか？"
+        message={deleting ? noteDisplayTitle(deleting.note.title) : ''}
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          if (deleting) list.deleteNote(deleting.note.id);
+          setDeleting(null);
+        }}
+      />
     </View>
   );
 }

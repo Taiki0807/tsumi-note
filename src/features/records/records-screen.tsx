@@ -1,12 +1,17 @@
+import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
+import { Button } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 
+import { ManualSessionSheet } from './manual-session-sheet';
+import { formatSessionRange } from './manual-session';
 import {
   chartMaxHours,
+  folderColorIndex,
   formatDayLabel,
   formatCorrectRate,
   formatDiff,
@@ -23,7 +28,28 @@ import { useWeeklyRecord } from './use-weekly-record';
 const CHART_HEIGHT = 120;
 const BAR_WIDTH = 24;
 
-function WeekChart({ days, maxHours, today }: { days: DayRecord[]; maxHours: number; today: number }) {
+/** Folder → chart color: the same primary → warning → info cycle as the folder list; 未分類 is success. */
+function useFolderColors(folders: { id: string }[]) {
+  const colors = useTheme();
+  const order = folders.map((f) => f.id);
+  const palette = [colors.primary, colors.warning, colors.info];
+  return (folderId: string | null) => {
+    const index = folderColorIndex(order, folderId);
+    return index < 0 ? colors.success : (palette[index % palette.length] ?? colors.primary);
+  };
+}
+
+function WeekChart({
+  days,
+  maxHours,
+  today,
+  colorFor,
+}: {
+  days: DayRecord[];
+  maxHours: number;
+  today: number;
+  colorFor: (folderId: string | null) => string;
+}) {
   const colors = useTheme();
   const gridLines = [maxHours, maxHours / 2, 0];
 
@@ -80,15 +106,27 @@ function WeekChart({ days, maxHours, today }: { days: DayRecord[]; maxHours: num
                     {label}
                   </Text>
                 )}
+                {/* Stacked by folder (v1.1.0): each segment uses its folder's color. */}
                 <View
                   accessibilityLabel={`${WEEKDAY_LABELS[day.weekdayIndex]}曜日 ${Math.floor(day.seconds / 60)}分`}
                   style={{
                     width: BAR_WIDTH,
                     height,
                     borderRadius: radius.sm,
-                    backgroundColor: isToday ? colors.primary : colors.primaryMuted,
+                    overflow: 'hidden',
+                    flexDirection: 'column-reverse',
                   }}
-                />
+                >
+                  {day.segments.map((segment) => (
+                    <View
+                      key={segment.folderId ?? 'none'}
+                      style={{
+                        height: day.seconds > 0 ? (segment.seconds / day.seconds) * height : 0,
+                        backgroundColor: colorFor(segment.folderId),
+                      }}
+                    />
+                  ))}
+                </View>
               </View>
               <Text
                 style={{
@@ -189,8 +227,17 @@ function IconButton({
 export function RecordsScreen() {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
-  const { view, weekStart, folderId, today, isCurrentWeek, selectFolder, previousWeek, nextWeek } =
-    useWeeklyRecord();
+  const {
+    view,
+    weekStart,
+    folderId,
+    today,
+    isCurrentWeek,
+    selectFolder,
+    previousWeek,
+    nextWeek,
+    addManualSession,
+  } = useWeeklyRecord();
 
   const record = view?.record;
   const total = splitDuration(record?.totalSeconds ?? 0);
@@ -207,6 +254,17 @@ export function RecordsScreen() {
   const folders = view?.folders ?? [];
   const understanding = view?.understanding;
   const needsReview = view?.needsReview ?? null;
+  const [adding, setAdding] = useState(false);
+  const sessions = view?.sessions ?? [];
+  const colorFor = useFolderColors(folders);
+  // Only folders that appear in this week's bars, in the order of the folder list.
+  const usedFolderIds = new Set(record?.days.flatMap((d) => d.segments.map((s) => s.folderId)));
+  const legend = [
+    ...folders
+      .filter((f) => usedFolderIds.has(f.id))
+      .map((f) => ({ folderId: f.id as string | null, name: f.name })),
+    ...(usedFolderIds.has(null) ? [{ folderId: null, name: '未分類' }] : []),
+  ];
   const selectedFolderName = folders.find((f) => f.id === folderId)?.name ?? 'すべて';
 
   const numeric = {
@@ -344,7 +402,30 @@ export function RecordsScreen() {
             today={today}
             days={record?.days ?? []}
             maxHours={record ? chartMaxHours(record.days) : 2}
+            colorFor={colorFor}
           />
+
+          {legend.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+              {legend.map(({ folderId, name }) => (
+                <View key={folderId ?? 'none'} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View
+                    style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colorFor(folderId) }}
+                  />
+                  <Text
+                    style={{
+                      fontFamily: fontFamily.bold,
+                      fontSize: typography.caption.fontSize,
+                      lineHeight: typography.caption.lineHeight,
+                      color: colors.textSecondary,
+                    }}
+                  >
+                    {name}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
 
           {record && record.totalSeconds === 0 && (
             <Text
@@ -398,6 +479,94 @@ export function RecordsScreen() {
             })}
           </ScrollView>
         )}
+
+        <View
+          style={{
+            gap: 12,
+            padding: 20,
+            borderRadius: radius.lg,
+            borderWidth: 1,
+            borderColor: colors.divider,
+            backgroundColor: colors.surface,
+            ...shadow.card,
+          }}
+        >
+          <View
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+          >
+            <Text
+              style={{
+                fontFamily: fontFamily.extraBold,
+                fontSize: 18,
+                lineHeight: 26,
+                color: colors.textPrimary,
+              }}
+            >
+              学習の記録
+            </Text>
+            <Button label="＋ 記録を追加" size="sm" onPress={() => setAdding(true)} />
+          </View>
+          {sessions.length === 0 ? (
+            <Text
+              style={{
+                fontFamily: fontFamily.bold,
+                fontSize: typography.bodySm.fontSize,
+                lineHeight: typography.bodySm.lineHeight,
+                color: colors.textSecondary,
+              }}
+            >
+              この週の記録はまだありません
+            </Text>
+          ) : (
+            sessions.slice(0, 10).map((s) => {
+              const d = new Date(s.startedAt);
+              return (
+                <View
+                  key={s.id}
+                  accessibilityLabel={`${d.getMonth() + 1}月${d.getDate()}日 ${formatSessionRange(s.startedAt, s.endedAt)} ${Math.floor(s.durationSeconds / 60)}分`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                >
+                  <View
+                    style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colorFor(s.folderId) }}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        fontFamily: fontFamily.extraBold,
+                        fontSize: typography.bodySm.fontSize,
+                        lineHeight: typography.bodySm.lineHeight,
+                        color: colors.textPrimary,
+                      }}
+                    >
+                      {`${d.getMonth() + 1}/${d.getDate()}（${WEEKDAY_LABELS[(d.getDay() + 6) % 7]}） ${formatSessionRange(s.startedAt, s.endedAt)}`}
+                    </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        fontFamily: fontFamily.regular,
+                        fontSize: typography.caption.fontSize,
+                        lineHeight: typography.caption.lineHeight,
+                        color: colors.textSecondary,
+                      }}
+                    >
+                      {folders.find((f) => f.id === s.folderId)?.name ?? '未分類'}
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      fontFamily: fontFamily.numeric,
+                      fontSize: 15,
+                      lineHeight: 24,
+                      color: colors.textPrimary,
+                    }}
+                  >
+                    {`${Math.floor(s.durationSeconds / 60)}分`}
+                  </Text>
+                </View>
+              );
+            })
+          )}
+        </View>
 
         {understanding && (
           <View
@@ -513,6 +682,14 @@ export function RecordsScreen() {
           </View>
         )}
       </ScrollView>
+      <ManualSessionSheet
+        visible={adding}
+        folders={folders}
+        today={today}
+        defaultFolderId={folderId}
+        onSubmit={addManualSession}
+        onClose={() => setAdding(false)}
+      />
     </View>
   );
 }

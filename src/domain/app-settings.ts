@@ -21,7 +21,35 @@ export const APP_SETTING_KEYS = {
   darkMode: 'appearance.darkMode',
   reminderEnabled: 'notification.reminderEnabled',
   reminderTime: 'notification.reminderTime',
+  timerSound: 'notification.timerSound',
+  timerVibration: 'notification.timerVibration',
 } as const;
+
+/** Timer end alerts (v1.1.0). Both are on by default: the sound already played before it became a setting. */
+export type TimerAlertSettings = {
+  sound: boolean;
+  vibration: boolean;
+};
+
+export const DEFAULT_TIMER_ALERTS: TimerAlertSettings = { sound: true, vibration: true };
+
+export function parseTimerAlerts(get: (key: string) => string | undefined): TimerAlertSettings {
+  const read = (key: string, fallback: boolean) => {
+    const raw = get(key);
+    return raw === 'true' ? true : raw === 'false' ? false : fallback;
+  };
+  return {
+    sound: read(APP_SETTING_KEYS.timerSound, DEFAULT_TIMER_ALERTS.sound),
+    vibration: read(APP_SETTING_KEYS.timerVibration, DEFAULT_TIMER_ALERTS.vibration),
+  };
+}
+
+export function serializeTimerAlerts(alerts: TimerAlertSettings): Record<string, string> {
+  return {
+    [APP_SETTING_KEYS.timerSound]: String(alerts.sound),
+    [APP_SETTING_KEYS.timerVibration]: String(alerts.vibration),
+  };
+}
 
 export function parseDarkMode(raw: string | undefined): DarkModeSetting {
   return raw === 'true' ? true : raw === 'false' ? false : null;

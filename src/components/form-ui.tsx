@@ -167,11 +167,18 @@ export function SearchField({
 export function TextField({
   label,
   multiline,
+  fill,
   ...inputProps
-}: { label: string; multiline?: boolean } & Omit<TextInputProps, 'style' | 'multiline'>) {
+}: {
+  label: string;
+  multiline?: boolean;
+  /** Multiline only: grow to the space the parent gives (full-screen editors) instead of 100pt. */
+  fill?: boolean;
+} & Omit<TextInputProps, 'style' | 'multiline'>) {
   const colors = useTheme();
+  const grow = !!multiline && !!fill;
   return (
-    <View style={{ gap: 8 }}>
+    <View style={{ gap: 8, flex: grow ? 1 : undefined }}>
       <Text style={{ fontFamily: fontFamily.extraBold, ...typography.bodySm, color: colors.textPrimary }}>
         {label}
       </Text>
@@ -181,7 +188,8 @@ export function TextField({
         multiline={multiline}
         textAlignVertical={multiline ? 'top' : 'center'}
         style={{
-          height: multiline ? 100 : 52,
+          flex: grow ? 1 : undefined,
+          height: grow ? undefined : multiline ? 100 : 52,
           paddingHorizontal: 16,
           paddingVertical: multiline ? 14 : 0,
           borderWidth: 1.5,
