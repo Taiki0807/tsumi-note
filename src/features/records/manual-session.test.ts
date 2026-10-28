@@ -1,4 +1,11 @@
-import { buildManualSession, formatSessionRange, recentDays } from './manual-session';
+import {
+  buildManualSession,
+  formatFullDate,
+  formatMinutes,
+  formatMonthDay,
+  formatSessionRange,
+  recentDays,
+} from './manual-session';
 import { buildWeeklyRecord, folderColorIndex, startOfWeek, summarizeDayByFolder } from './records-logic';
 
 const local = (m: number, d: number, h = 0, min = 0) => new Date(2026, m - 1, d, h, min).getTime();
@@ -62,5 +69,19 @@ describe('per-folder chart segments', () => {
     expect(folderColorIndex(['a', 'b'], 'b')).toBe(1);
     expect(folderColorIndex(['a', 'b'], null)).toBe(-1);
     expect(folderColorIndex(['a', 'b'], 'zzz')).toBe(-1);
+  });
+});
+
+describe('date / duration formatting', () => {
+  it('formats the day title and the full date with the weekday', () => {
+    expect(formatMonthDay(local(9, 13))).toBe('9月13日（日）');
+    expect(formatFullDate(local(9, 13))).toBe('2026年9月13日（日）');
+  });
+
+  it('formats durations in hours and minutes', () => {
+    expect(formatMinutes(95 * 60)).toBe('1時間35分');
+    expect(formatMinutes(25 * 60)).toBe('25分');
+    expect(formatMinutes(60 * 60)).toBe('1時間0分');
+    expect(formatMinutes(0)).toBe('0分');
   });
 });

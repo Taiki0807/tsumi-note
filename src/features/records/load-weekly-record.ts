@@ -1,5 +1,4 @@
 import type { Repositories } from '@/db/repositories';
-import type { StudySession } from '@/db/repositories/study-session-repository';
 
 import {
   addWeeks,
@@ -20,8 +19,6 @@ export type WeeklyRecordView = {
   /** 「今週の要復習」: highest error-rate question of the same week and folder filter. */
   needsReview: NeedsReview | null;
   folders: { id: string; name: string }[];
-  /** Sessions of the selected week and folder filter, newest first (start / end times for the list). */
-  sessions: StudySession[];
 };
 
 /**
@@ -47,11 +44,5 @@ export function loadWeeklyRecord(
     understanding: buildUnderstanding(answers, weekStart),
     needsReview: buildNeedsReview(answers, weekStart),
     folders: folderList,
-    sessions: sessions.filter(
-      (s) =>
-        s.startedAt >= weekStart &&
-        s.startedAt < addWeeks(weekStart, 1) &&
-        (folderId === undefined || s.folderId === folderId),
-    ),
   };
 }

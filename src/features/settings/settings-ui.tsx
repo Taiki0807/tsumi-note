@@ -7,7 +7,19 @@ import { IconButton } from '@/components/form-ui';
 import { fontFamily, layout, typography, useTheme } from '@/design';
 
 /** Sub-screen chrome shared with 復習設定 / 目標: 64pt app bar with a back button, then a scrolling body. */
-export function SettingsScaffold({ title, children }: { title: string; children: ReactNode }) {
+export function SettingsScaffold({
+  title,
+  children,
+  closeIcon = false,
+  gap = 14,
+}: {
+  title: string;
+  children: ReactNode;
+  /** A × instead of ← for screens that are entered as a form (Figma 02c). */
+  closeIcon?: boolean;
+  /** Vertical gap between the sections of the body (Figma: 14 for settings, 16–20 for records). */
+  gap?: number;
+}) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   return (
@@ -24,7 +36,11 @@ export function SettingsScaffold({ title, children }: { title: string; children:
           paddingBottom: 8,
         }}
       >
-        <IconButton name="arrow-left" label="戻る" onPress={() => router.back()} />
+        <IconButton
+          name={closeIcon ? 'close' : 'arrow-left'}
+          label={closeIcon ? '閉じる' : '戻る'}
+          onPress={() => router.back()}
+        />
         <Text
           accessibilityRole="header"
           style={{
@@ -42,7 +58,7 @@ export function SettingsScaffold({ title, children }: { title: string; children:
           alignSelf: 'center',
           width: '100%',
           maxWidth: layout.contentMaxWidth,
-          gap: 14,
+          gap,
           paddingTop: 8,
           paddingHorizontal: 24,
           paddingBottom: Math.max(insets.bottom, 24) + 24,

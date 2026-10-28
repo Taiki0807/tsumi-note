@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from 'react';
+import { useEffect, useRef, type ReactNode, type Ref } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -217,17 +217,32 @@ export function BottomSheet({
   onClose,
   children,
   gap = 20,
+  onDismissed,
 }: {
   visible: boolean;
   onClose: () => void;
   children: ReactNode;
   /** Vertical gap between sections: 20 for forms, 16 for confirmation sheets (Figma 06b / 08c). */
   gap?: number;
+  /**
+   * Called once the sheet's Modal has fully unmounted after closing. Open a follow-up Modal from here:
+   * iOS ignores a Modal presented while another one is still dismissing.
+   */
+  onDismissed?: () => void;
 }) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   // Open/close animation, backdrop fade and grabber drag are shared with the timer settings sheet.
   const { mounted, panHandlers, backdropStyle, sheetStyle } = useSheetMotion({ visible, onClose });
+  const wasMounted = useRef(false);
+  const dismissed = useRef(onDismissed);
+  useEffect(() => {
+    dismissed.current = onDismissed;
+  });
+  useEffect(() => {
+    if (wasMounted.current && !mounted) dismissed.current?.();
+    wasMounted.current = mounted;
+  }, [mounted]);
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <KeyboardAvoidingView

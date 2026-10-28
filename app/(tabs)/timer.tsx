@@ -246,6 +246,8 @@ export default function TimerScreen() {
       />
       <FolderFormSheet
         visible={showCreateFolder}
+        subtitle="作成すると、このタイマーの記録先になります"
+        submitLabel="作成して選択"
         onSubmit={timer.createFolder}
         onClose={() => setShowCreateFolder(false)}
       />

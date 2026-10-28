@@ -1,6 +1,6 @@
 import { parseReminderTime } from '@/domain/app-settings';
 
-import { addDays } from './records-logic';
+import { addDays, WEEKDAY_LABELS } from './records-logic';
 
 /** Longest single record (24h): guards against typos such as 00:00–23:59 entered by accident twice. */
 export const MAX_MANUAL_SESSION_SECONDS = 24 * 60 * 60;
@@ -48,6 +48,25 @@ export function recentDays(todayStart: number, count = 7): number[] {
 export function formatClock(at: number): string {
   const d = new Date(at);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** e.g. 「9月13日（日）」: the title of the daily records screen (Figma 02b). */
+export function formatMonthDay(dayStart: number): string {
+  const d = new Date(dayStart);
+  return `${d.getMonth() + 1}月${d.getDate()}日（${WEEKDAY_LABELS[(d.getDay() + 6) % 7]}）`;
+}
+
+/** e.g. 「2026年9月13日（日）」: the date field of 「記録を追加」 (Figma 02c). */
+export function formatFullDate(dayStart: number): string {
+  return `${new Date(dayStart).getFullYear()}年${formatMonthDay(dayStart)}`;
+}
+
+/** 「1時間35分」 / 「25分」 / 「0分」: a duration in the daily records screen. */
+export function formatMinutes(seconds: number): string {
+  const total = Math.floor(seconds / 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h > 0 ? `${h}時間${m}分` : `${m}分`;
 }
 
 /** e.g. 「9:30–10:05」 shown on a session row. */

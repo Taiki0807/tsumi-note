@@ -1,17 +1,14 @@
-import { useState } from 'react';
+import { router } from 'expo-router';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
-import { Button } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 
-import { ManualSessionSheet } from './manual-session-sheet';
-import { formatSessionRange } from './manual-session';
+import { useFolderColors } from './folder-colors';
 import {
   chartMaxHours,
-  folderColorIndex,
   formatDayLabel,
   formatCorrectRate,
   formatDiff,
@@ -27,19 +24,6 @@ import { useWeeklyRecord } from './use-weekly-record';
 /** Figma 02 学習記録 › Weekly chart: 150pt frame, baseline 120pt below the top gridline. */
 const CHART_HEIGHT = 120;
 const BAR_WIDTH = 24;
-/** 「学習の記録」 list viewport (~5 rows); longer lists scroll inside the card. */
-const SESSION_LIST_MAX_HEIGHT = 260;
-
-/** Folder → chart color: the same primary → warning → info cycle as the folder list; 未分類 is success. */
-function useFolderColors(folders: { id: string }[]) {
-  const colors = useTheme();
-  const order = folders.map((f) => f.id);
-  const palette = [colors.primary, colors.warning, colors.info];
-  return (folderId: string | null) => {
-    const index = folderColorIndex(order, folderId);
-    return index < 0 ? colors.success : (palette[index % palette.length] ?? colors.primary);
-  };
-}
 
 function WeekChart({
   days,
@@ -92,7 +76,14 @@ function WeekChart({
           const height = (day.seconds / 3600 / maxHours) * CHART_HEIGHT;
           const label = formatDayLabel(day.seconds);
           return (
-            <View key={day.dayStart} style={{ flex: 1, alignItems: 'center' }}>
+            // Tapping a day opens its time-by-time records (Figma 02b).
+            <Pressable
+              key={day.dayStart}
+              accessibilityRole="button"
+              accessibilityLabel={`${WEEKDAY_LABELS[day.weekdayIndex]}曜日の記録を開く`}
+              onPress={() => router.push({ pathname: '/records/day', params: { day: String(day.dayStart) } })}
+              style={{ flex: 1, alignItems: 'center' }}
+            >
               <View style={{ height: CHART_HEIGHT, justifyContent: 'flex-end' }}>
                 {label && (
                   <Text
@@ -141,7 +132,7 @@ function WeekChart({
               >
                 {WEEKDAY_LABELS[day.weekdayIndex]}
               </Text>
-            </View>
+            </Pressable>
           );
         })}
       </View>
@@ -229,17 +220,8 @@ function IconButton({
 export function RecordsScreen() {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
-  const {
-    view,
-    weekStart,
-    folderId,
-    today,
-    isCurrentWeek,
-    selectFolder,
-    previousWeek,
-    nextWeek,
-    addManualSession,
-  } = useWeeklyRecord();
+  const { view, weekStart, folderId, today, isCurrentWeek, selectFolder, previousWeek, nextWeek } =
+    useWeeklyRecord();
 
   const record = view?.record;
   const total = splitDuration(record?.totalSeconds ?? 0);
@@ -256,8 +238,6 @@ export function RecordsScreen() {
   const folders = view?.folders ?? [];
   const understanding = view?.understanding;
   const needsReview = view?.needsReview ?? null;
-  const [adding, setAdding] = useState(false);
-  const sessions = view?.sessions ?? [];
   const colorFor = useFolderColors(folders);
   // Only folders that appear in this week's bars, in the order of the folder list.
   const usedFolderIds = new Set(record?.days.flatMap((d) => d.segments.map((s) => s.folderId)));
@@ -311,6 +291,27 @@ export function RecordsScreen() {
         >
           学習記録
         </Text>
+        {/* Figma 02 › IconButton/記録を追加: 44pt primary-soft circle with a 22pt plus → 記録を追加 (02c). */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="記録を追加"
+          onPress={() =>
+            router.push({
+              pathname: '/records/add',
+              params: { day: String(today), folderId: folderId ?? '' },
+            })
+          }
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: colors.primarySoft,
+          }}
+        >
+          <Icon name="plus" size={22} color={colors.primary} strokeWidth={2.4} />
+        </Pressable>
       </View>
 
       <ScrollView
@@ -482,105 +483,6 @@ export function RecordsScreen() {
           </ScrollView>
         )}
 
-        <View
-          style={{
-            gap: 12,
-            padding: 20,
-            borderRadius: radius.lg,
-            borderWidth: 1,
-            borderColor: colors.divider,
-            backgroundColor: colors.surface,
-            ...shadow.card,
-          }}
-        >
-          <View
-            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
-          >
-            <Text
-              style={{
-                fontFamily: fontFamily.extraBold,
-                fontSize: 18,
-                lineHeight: 26,
-                color: colors.textPrimary,
-              }}
-            >
-              学習の記録
-            </Text>
-            <Button label="＋ 記録を追加" size="sm" onPress={() => setAdding(true)} />
-          </View>
-          {sessions.length === 0 ? (
-            <Text
-              style={{
-                fontFamily: fontFamily.bold,
-                fontSize: typography.bodySm.fontSize,
-                lineHeight: typography.bodySm.lineHeight,
-                color: colors.textSecondary,
-              }}
-            >
-              この週の記録はまだありません
-            </Text>
-          ) : (
-            <ScrollView
-              nestedScrollEnabled
-              style={{ maxHeight: SESSION_LIST_MAX_HEIGHT }}
-              contentContainerStyle={{ gap: 14 }}
-            >
-              {sessions.map((s) => {
-                const d = new Date(s.startedAt);
-                return (
-                  <View
-                    key={s.id}
-                    accessibilityLabel={`${d.getMonth() + 1}月${d.getDate()}日 ${formatSessionRange(s.startedAt, s.endedAt)} ${Math.floor(s.durationSeconds / 60)}分`}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
-                  >
-                    <View
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: 5,
-                        backgroundColor: colorFor(s.folderId),
-                      }}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={{
-                          fontFamily: fontFamily.extraBold,
-                          fontSize: typography.bodySm.fontSize,
-                          lineHeight: typography.bodySm.lineHeight,
-                          color: colors.textPrimary,
-                        }}
-                      >
-                        {`${d.getMonth() + 1}/${d.getDate()}（${WEEKDAY_LABELS[(d.getDay() + 6) % 7]}） ${formatSessionRange(s.startedAt, s.endedAt)}`}
-                      </Text>
-                      <Text
-                        numberOfLines={1}
-                        style={{
-                          fontFamily: fontFamily.regular,
-                          fontSize: typography.caption.fontSize,
-                          lineHeight: typography.caption.lineHeight,
-                          color: colors.textSecondary,
-                        }}
-                      >
-                        {folders.find((f) => f.id === s.folderId)?.name ?? '未分類'}
-                      </Text>
-                    </View>
-                    <Text
-                      style={{
-                        fontFamily: fontFamily.numeric,
-                        fontSize: 15,
-                        lineHeight: 24,
-                        color: colors.textPrimary,
-                      }}
-                    >
-                      {`${Math.floor(s.durationSeconds / 60)}分`}
-                    </Text>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          )}
-        </View>
-
         {understanding && (
           <View
             style={{
@@ -695,14 +597,6 @@ export function RecordsScreen() {
           </View>
         )}
       </ScrollView>
-      <ManualSessionSheet
-        visible={adding}
-        folders={folders}
-        today={today}
-        defaultFolderId={folderId}
-        onSubmit={addManualSession}
-        onClose={() => setAdding(false)}
-      />
     </View>
   );
 }
