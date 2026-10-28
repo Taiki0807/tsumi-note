@@ -34,6 +34,7 @@ import { FolderPickerSheet } from '@/features/timer/folder-picker-sheet';
 import { MarkdownView, NoteImage } from './markdown-view';
 import { formatNoteTime, noteDisplayTitle } from './note-format';
 import { useFolderTone } from './folder-tone';
+import { NoteMenuSheet } from './note-menu-sheet';
 import { OptionSheet, type SheetOption } from './option-sheet';
 import { useNoteEditor } from './use-notes';
 
@@ -235,26 +236,9 @@ export function NoteEditorScreen() {
     router.back();
   };
 
-  const openMenu = () => {
-    const id = noteId.current;
-    Alert.alert(noteDisplayTitle(title), undefined, [
-      ...(id
-        ? [
-            {
-              text: pinned ? 'ピン留めを解除' : 'ピン留め',
-              onPress: () => {
-                flush();
-                editor.setPinned(id, !pinned);
-                setPinned(!pinned);
-              },
-            },
-          ]
-        : []),
-      { text: '科目を変更', onPress: () => setPickingFolder(true) },
-      { text: '削除', style: 'destructive' as const, onPress: id ? confirmDelete : () => router.back() },
-      { text: 'キャンセル', style: 'cancel' as const },
-    ]);
-  };
+  // Figma 03b ノートのメニュー (NoteMenuSheet).
+  const [menuOpen, setMenuOpen] = useState(false);
+  const openMenu = () => setMenuOpen(true);
 
   if (routeId && !detail) {
     // Deleted (or never existed): nothing to edit but a way back.
@@ -566,8 +550,28 @@ export function NoteEditorScreen() {
         onSelect={applyBlockOption}
         onClose={() => setSheet(null)}
       />
+      <NoteMenuSheet
+        visible={menuOpen}
+        title={noteDisplayTitle(title)}
+        pinned={pinned}
+        onTogglePin={
+          // `updatedAt` is set once the note exists in the database (nothing to pin before that).
+          updatedAt === undefined
+            ? undefined
+            : () => {
+                flush();
+                if (noteId.current) editor.setPinned(noteId.current, !pinned);
+                setPinned(!pinned);
+              }
+        }
+        onChangeFolder={() => setPickingFolder(true)}
+        onDelete={() => (noteId.current ? confirmDelete() : router.back())}
+        onClose={() => setMenuOpen(false)}
+      />
       <FolderPickerSheet
         visible={pickingFolder}
+        title="科目を変更"
+        subtitle={null}
         folders={folders}
         selectedId={folderId}
         onSelect={updateFolder}

@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
@@ -10,6 +10,7 @@ import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/desi
 
 import { useFolderTone } from './folder-tone';
 import { formatNoteTime, noteDisplayTitle } from './note-format';
+import { NoteMenuSheet } from './note-menu-sheet';
 import type { NoteRow } from './note-use-cases';
 import { useNoteList } from './use-notes';
 
@@ -100,15 +101,11 @@ export function NoteListScreen() {
   const [deleting, setDeleting] = useState<NoteRow | null>(null);
   const confirmDelete = (row: NoteRow) => setDeleting(row);
 
-  const openMenu = (row: NoteRow) =>
-    Alert.alert(noteDisplayTitle(row.note.title), undefined, [
-      {
-        text: row.note.pinned ? 'ピン留めを解除' : 'ピン留め',
-        onPress: () => list.setPinned(row.note.id, !row.note.pinned),
-      },
-      { text: '削除', style: 'destructive', onPress: () => confirmDelete(row) },
-      { text: 'キャンセル', style: 'cancel' },
-    ]);
+  // Figma 03b ノートのメニュー
+  // The row stays after closing so the title doesn't flash empty while the sheet animates out.
+  const [menu, setMenu] = useState<{ row: NoteRow; open: boolean } | null>(null);
+  const shownRow = menu?.row ?? null;
+  const openMenu = (row: NoteRow) => setMenu({ row, open: true });
 
   const newNote = () =>
     router.push({ pathname: '/notes/[id]', params: { id: 'new', folderId: list.folderId ?? '' } });
@@ -253,6 +250,18 @@ export function NoteListScreen() {
           </View>
         )}
       </ScrollView>
+      <NoteMenuSheet
+        visible={menu?.open ?? false}
+        title={shownRow ? noteDisplayTitle(shownRow.note.title) : ''}
+        pinned={shownRow?.note.pinned ?? false}
+        onTogglePin={() => {
+          if (shownRow) list.setPinned(shownRow.note.id, !shownRow.note.pinned);
+        }}
+        onDelete={() => {
+          if (shownRow) confirmDelete(shownRow);
+        }}
+        onClose={() => setMenu((m) => (m ? { ...m, open: false } : m))}
+      />
       <ConfirmDeleteSheet
         visible={deleting !== null}
         title="ノートを削除しますか？"

@@ -12,19 +12,29 @@ type Props = {
   initialName?: string;
   onSubmit: (name: string) => void;
   onClose: () => void;
+  /** Hint under the title (create mode). Figma 01c (from the timer) words it differently from 12. */
+  subtitle?: string;
+  /** Create-mode button label. Figma 01c uses 「作成して選択」. */
+  submitLabel?: string;
 };
 
 /** Figma 12 フォルダー作成 › Bottom sheet. Rename reuses it (not designed in Figma). */
-export function FolderFormSheet({ visible, initialName, onSubmit, onClose }: Props) {
+export function FolderFormSheet({ visible, ...rest }: Props) {
   // Remount the body per open so the input always starts from `initialName`.
   return (
-    <BottomSheet visible={visible} onClose={onClose}>
-      {visible && <FolderForm initialName={initialName} onSubmit={onSubmit} onClose={onClose} />}
+    <BottomSheet visible={visible} onClose={rest.onClose}>
+      {visible && <FolderForm {...rest} />}
     </BottomSheet>
   );
 }
 
-function FolderForm({ initialName, onSubmit, onClose }: Omit<Props, 'visible'>) {
+function FolderForm({
+  initialName,
+  onSubmit,
+  onClose,
+  subtitle = '科目や資格ごとに問題をまとめます',
+  submitLabel = '作成',
+}: Omit<Props, 'visible'>) {
   const colors = useTheme();
   const editing = initialName !== undefined;
   const [name, setName] = useState(initialName ?? '');
@@ -67,7 +77,7 @@ function FolderForm({ initialName, onSubmit, onClose }: Omit<Props, 'visible'>) 
             {editing ? 'フォルダー名を変更' : 'フォルダーを作成'}
           </Text>
           <Text style={{ fontFamily: fontFamily.regular, ...typography.label, color: colors.textSecondary }}>
-            科目や資格ごとに問題をまとめます
+            {subtitle}
           </Text>
         </View>
       </View>
@@ -95,7 +105,7 @@ function FolderForm({ initialName, onSubmit, onClose }: Omit<Props, 'visible'>) 
       </View>
       <View style={{ flexDirection: 'row', gap: 12 }}>
         <Button label="キャンセル" variant="secondary" onPress={onClose} flex />
-        <Button label={editing ? '保存' : '作成'} onPress={submit} disabled={isBlank(name)} flex />
+        <Button label={editing ? '保存' : submitLabel} onPress={submit} disabled={isBlank(name)} flex />
       </View>
     </>
   );

@@ -390,6 +390,15 @@ export function MyPageScreen() {
                   />
                 }
               />
+              {/* Figma 16 マイページ（登録済み）: API連携はログイン中だけ。キーはアカウントごとに発行する */}
+              {auth.state.status === 'signedIn' ? (
+                <SettingsRow
+                  icon="link"
+                  tone="info"
+                  title="API連携"
+                  onPress={() => router.push('/settings/api')}
+                />
+              ) : null}
               <SettingsRow
                 icon="shield"
                 tone="success"
