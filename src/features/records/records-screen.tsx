@@ -27,6 +27,8 @@ import { useWeeklyRecord } from './use-weekly-record';
 /** Figma 02 学習記録 › Weekly chart: 150pt frame, baseline 120pt below the top gridline. */
 const CHART_HEIGHT = 120;
 const BAR_WIDTH = 24;
+/** 「学習の記録」 list viewport (~5 rows); longer lists scroll inside the card. */
+const SESSION_LIST_MAX_HEIGHT = 260;
 
 /** Folder → chart color: the same primary → warning → info cycle as the folder list; 未分類 is success. */
 function useFolderColors(folders: { id: string }[]) {
@@ -518,53 +520,64 @@ export function RecordsScreen() {
               この週の記録はまだありません
             </Text>
           ) : (
-            sessions.slice(0, 10).map((s) => {
-              const d = new Date(s.startedAt);
-              return (
-                <View
-                  key={s.id}
-                  accessibilityLabel={`${d.getMonth() + 1}月${d.getDate()}日 ${formatSessionRange(s.startedAt, s.endedAt)} ${Math.floor(s.durationSeconds / 60)}分`}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
-                >
+            <ScrollView
+              nestedScrollEnabled
+              style={{ maxHeight: SESSION_LIST_MAX_HEIGHT }}
+              contentContainerStyle={{ gap: 14 }}
+            >
+              {sessions.map((s) => {
+                const d = new Date(s.startedAt);
+                return (
                   <View
-                    style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colorFor(s.folderId) }}
-                  />
-                  <View style={{ flex: 1 }}>
+                    key={s.id}
+                    accessibilityLabel={`${d.getMonth() + 1}月${d.getDate()}日 ${formatSessionRange(s.startedAt, s.endedAt)} ${Math.floor(s.durationSeconds / 60)}分`}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                  >
+                    <View
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 5,
+                        backgroundColor: colorFor(s.folderId),
+                      }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontFamily: fontFamily.extraBold,
+                          fontSize: typography.bodySm.fontSize,
+                          lineHeight: typography.bodySm.lineHeight,
+                          color: colors.textPrimary,
+                        }}
+                      >
+                        {`${d.getMonth() + 1}/${d.getDate()}（${WEEKDAY_LABELS[(d.getDay() + 6) % 7]}） ${formatSessionRange(s.startedAt, s.endedAt)}`}
+                      </Text>
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          fontFamily: fontFamily.regular,
+                          fontSize: typography.caption.fontSize,
+                          lineHeight: typography.caption.lineHeight,
+                          color: colors.textSecondary,
+                        }}
+                      >
+                        {folders.find((f) => f.id === s.folderId)?.name ?? '未分類'}
+                      </Text>
+                    </View>
                     <Text
                       style={{
-                        fontFamily: fontFamily.extraBold,
-                        fontSize: typography.bodySm.fontSize,
-                        lineHeight: typography.bodySm.lineHeight,
+                        fontFamily: fontFamily.numeric,
+                        fontSize: 15,
+                        lineHeight: 24,
                         color: colors.textPrimary,
                       }}
                     >
-                      {`${d.getMonth() + 1}/${d.getDate()}（${WEEKDAY_LABELS[(d.getDay() + 6) % 7]}） ${formatSessionRange(s.startedAt, s.endedAt)}`}
-                    </Text>
-                    <Text
-                      numberOfLines={1}
-                      style={{
-                        fontFamily: fontFamily.regular,
-                        fontSize: typography.caption.fontSize,
-                        lineHeight: typography.caption.lineHeight,
-                        color: colors.textSecondary,
-                      }}
-                    >
-                      {folders.find((f) => f.id === s.folderId)?.name ?? '未分類'}
+                      {`${Math.floor(s.durationSeconds / 60)}分`}
                     </Text>
                   </View>
-                  <Text
-                    style={{
-                      fontFamily: fontFamily.numeric,
-                      fontSize: 15,
-                      lineHeight: 24,
-                      color: colors.textPrimary,
-                    }}
-                  >
-                    {`${Math.floor(s.durationSeconds / 60)}分`}
-                  </Text>
-                </View>
-              );
-            })
+                );
+              })}
+            </ScrollView>
           )}
         </View>
 

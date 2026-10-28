@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,7 +13,10 @@ type Props = {
   selectedId: string | null;
   onSelect: (folderId: string | null) => void;
   onClose: () => void;
-  /** Shows a 「新しいフォルダー」 row. The caller closes this sheet and opens the create form. */
+  /**
+   * Shows a 「新しいフォルダー」 row. The picker closes itself and calls this only after its Modal has
+   * unmounted: iOS ignores a Modal presented while another is still dismissing.
+   */
   onCreate?: () => void;
 };
 
@@ -24,6 +28,13 @@ export function FolderPickerSheet({ visible, folders, selectedId, onSelect, onCl
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const { mounted, panHandlers, backdropStyle, sheetStyle } = useSheetMotion({ visible, onClose });
+  const createPending = useRef(false);
+  useEffect(() => {
+    if (!mounted && createPending.current) {
+      createPending.current = false;
+      onCreate?.();
+    }
+  }, [mounted, onCreate]);
   const options = [{ id: null, name: '未分類' }, ...folders];
 
   return (
@@ -111,7 +122,10 @@ export function FolderPickerSheet({ visible, folders, selectedId, onSelect, onCl
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="新しいフォルダーを作成"
-                onPress={onCreate}
+                onPress={() => {
+                  createPending.current = true;
+                  onClose();
+                }}
                 style={{
                   height: 48,
                   flexDirection: 'row',

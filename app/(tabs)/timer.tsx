@@ -242,10 +242,7 @@ export default function TimerScreen() {
         selectedId={timer.selectedFolderId}
         onSelect={timer.selectFolder}
         onClose={() => setShowFolders(false)}
-        onCreate={() => {
-          setShowFolders(false);
-          setShowCreateFolder(true);
-        }}
+        onCreate={() => setShowCreateFolder(true)}
       />
       <FolderFormSheet
         visible={showCreateFolder}

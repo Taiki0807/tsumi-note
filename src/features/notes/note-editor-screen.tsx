@@ -575,8 +575,8 @@ export function NoteEditorScreen() {
       />
       <ConfirmDeleteSheet
         visible={confirmingDelete}
-        title="このノートを削除しますか？"
-        message={noteDisplayTitle(title)}
+        title="ノートを削除しますか？"
+        message={`「${noteDisplayTitle(title)}」を削除します。この操作は取り消せません。`}
         onCancel={() => setConfirmingDelete(false)}
         onConfirm={deleteNow}
       />

@@ -255,8 +255,12 @@ export function NoteListScreen() {
       </ScrollView>
       <ConfirmDeleteSheet
         visible={deleting !== null}
-        title="このノートを削除しますか？"
-        message={deleting ? noteDisplayTitle(deleting.note.title) : ''}
+        title="ノートを削除しますか？"
+        message={
+          deleting
+            ? `「${noteDisplayTitle(deleting.note.title)}」を削除します。この操作は取り消せません。`
+            : ''
+        }
         onCancel={() => setDeleting(null)}
         onConfirm={() => {
           if (deleting) list.deleteNote(deleting.note.id);
