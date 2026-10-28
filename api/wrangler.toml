@@ -43,8 +43,8 @@ name = "tsumi-note-api-production"
 crons = ["17 3 * * *"] # 削除済みアカウントのR2残骸の掃除
 [env.production.vars]
 APP_ENV = "production"
-BETTER_AUTH_URL = "https://api.example.invalid"
-EMAIL_FROM = "つみノート <noreply@example.invalid>"
+BETTER_AUTH_URL = "https://api.tsumi-note.hosokawa-lab.dev"
+EMAIL_FROM = "つみノート <noreply@hosokawa-lab.dev>"
 APP_SCHEME = "tsumi-note"
 APPLE_APP_BUNDLE_ID = "dev.hosokawalab.tsuminote"
 # GOOGLE_CLIENT_IDS = ""
@@ -52,10 +52,13 @@ APPLE_APP_BUNDLE_ID = "dev.hosokawalab.tsuminote"
 # APP_UNIVERSAL_LINK_ORIGIN = ""
 [[env.production.d1_databases]]
 binding = "DB"
-database_name = "tsumi-note-db-production"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_name = "tsumi-note-prod"
+database_id = "9fb89905-ff01-44a2-bbbd-10f24c501be2"
 migrations_dir = "migrations"
 # `wrangler r2 bucket create tsumi-note-images-production`(公開アクセスは有効にしない)
 [[env.production.r2_buckets]]
 binding = "IMAGES"
 bucket_name = "tsumi-note-images-production"
+[[env.production.routes]]
+pattern = "api.tsumi-note.hosokawa-lab.dev"
+custom_domain = true

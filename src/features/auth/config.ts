@@ -32,7 +32,10 @@ export function normalizeApiUrl(value: string | undefined, isDev: boolean): stri
 }
 
 export function readAuthConfig(
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined> = {
+    EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
+    EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+  },
   isDev: boolean = typeof __DEV__ !== 'undefined' && __DEV__,
 ): AuthConfig {
   return {

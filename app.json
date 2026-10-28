@@ -11,7 +11,12 @@
     "ios": {
       "supportsTablet": true,
       "usesAppleSignIn": true,
-      "bundleIdentifier": "dev.hosokawalab.tsuminote"
+      "bundleIdentifier": "dev.hosokawalab.tsuminote",
+      "infoPlist": {
+        "CFBundleDevelopmentRegion": "ja",
+        "CFBundleLocalizations": ["ja"]
+      },
+      "buildNumber": "3"
     },
     "web": {
       "bundler": "metro",
@@ -25,7 +30,9 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "ノートに挿入する画像を選ぶために、写真ライブラリへアクセスします。"
+          "photosPermission": "ノートに挿入する画像を選ぶために、写真ライブラリへアクセスします。",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       [
