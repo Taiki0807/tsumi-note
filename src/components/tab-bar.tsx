@@ -116,7 +116,7 @@ function Bulge({
   );
 }
 
-export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarProps) {
+export function TabBar({ state, descriptors, emitter, navigateToTab, insets }: BottomTabBarProps) {
   const colors = useTheme();
   const reduceMotion = useReducedMotion();
   const rowWidth = useSharedValue(0);
@@ -158,8 +158,8 @@ export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarP
           const label = options.title ?? route.name;
 
           const onPress = () => {
-            const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-            if (!focused && !event.defaultPrevented) navigation.navigate(route.name, route.params);
+            const event = emitter.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+            if (!focused && !event.defaultPrevented) navigateToTab(route.key);
           };
 
           const labelStyle = {

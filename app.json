@@ -7,7 +7,6 @@
     "orientation": "default",
     "icon": "./assets/AppIcon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "usesAppleSignIn": true,
@@ -46,7 +45,8 @@
       ],
       "expo-apple-authentication",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true
