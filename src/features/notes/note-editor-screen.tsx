@@ -9,6 +9,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  type TextInputInstance,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -129,7 +130,7 @@ export function NoteEditorScreen() {
   const selection = useRef<Selection>({ start: body.length, end: body.length });
   // Selection to push into one text segment (index + range local to that segment).
   const [sel, setSel] = useState<{ seg: number; range: Selection } | undefined>(undefined);
-  const segmentInputs = useRef<(TextInput | null)[]>([]);
+  const segmentInputs = useRef<(TextInputInstance | null)[]>([]);
   // Images are shown as images while editing; the Markdown body stays the only stored content.
   const segments = splitEditorSegments(body);
   const focusSegment = (index: number | undefined) =>

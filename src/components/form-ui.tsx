@@ -7,6 +7,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  type TextInputInstance,
   View,
   type TextInputProps,
 } from 'react-native';
@@ -123,7 +124,7 @@ export function SearchField({
   value: string;
   onChangeText: (text: string) => void;
   placeholder: string;
-  inputRef?: Ref<TextInput>;
+  inputRef?: Ref<TextInputInstance>;
 }) {
   const colors = useTheme();
   return (
