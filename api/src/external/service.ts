@@ -6,13 +6,23 @@ import type { Change } from '../sync/validate';
  * 外部サービス連携API(v1.1.0)。
  *
  * - 認証は個人APIトークン(`Authorization: Bearer tsn_...`)。トークンはSHA-256ハッシュだけを保存し、作成時に一度だけ表示する。
- * - トークンの権限は「学習記録の登録」だけ。読み取り・アカウント操作・他のエンティティの書き込みには使えない。
+ * - トークンの権限(scope)は「学習記録の登録(study_sessions:write)」と「学習記録の読み取り(study_sessions:read)」だけ。
+ *   アカウント操作・同期・他のエンティティには使えない。権限のないAPIは 403 insufficient_scope。
+ * - 有効期限を設定でき、期限切れは失効と同じく 401 になる。
  * - 書き込み先のユーザーは常にトークンの持ち主(本文・クエリのユーザーIDは存在しない)。
  * - 登録した学習記録は通常の同期レコード(study_sessions)になり、アプリは次回の同期で受け取る。
  */
 export const TOKEN_PREFIX = 'tsn_';
 export const MAX_ACTIVE_TOKENS = 5;
 export const MAX_TOKEN_NAME = 50;
+export const SCOPES = ['study_sessions:write', 'study_sessions:read'] as const;
+export type Scope = (typeof SCOPES)[number];
+/** scopes 未指定の発行・列追加前の既存トークンは、従来どおり登録専用 */
+export const DEFAULT_SCOPES: Scope[] = ['study_sessions:write'];
+export const MAX_EXPIRES_IN_DAYS = 365;
+const DAY_MS = 24 * 60 * 60 * 1000;
+export const MAX_READ_LIMIT = 100;
+export const MAX_SUMMARY_DAYS = 92;
 /** 1トークンあたりの登録回数の上限 */
 export const EXTERNAL_RATE_MAX = 60;
 export const EXTERNAL_RATE_WINDOW_MS = 60 * 1000;
@@ -24,7 +34,7 @@ const EARLIEST = Date.UTC(2000, 0, 1);
 export class ExternalError extends Error {
   constructor(
     readonly code: string,
-    readonly status: 400 | 401 | 404 | 409 | 422 | 429,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 422 | 429,
     message?: string,
   ) {
     super(message ?? code);
@@ -49,7 +59,14 @@ export type TokenInfo = {
   prefix: string;
   createdAt: number;
   lastUsedAt: number | null;
+  scopes: Scope[];
+  /** 有効期限(ms)。null は無期限 */
+  expiresAt: number | null;
 };
+
+function parseScopes(raw: string): Scope[] {
+  return raw.split(',').filter((s): s is Scope => (SCOPES as readonly string[]).includes(s));
+}
 
 export async function listTokens(driver: SyncDriver, userId: string): Promise<TokenInfo[]> {
   const rows = await driver.all<{
@@ -58,8 +75,10 @@ export async function listTokens(driver: SyncDriver, userId: string): Promise<To
     token_prefix: string;
     created_at: number;
     last_used_at: number | null;
+    scopes: string;
+    expires_at: number | null;
   }>({
-    sql: `SELECT id, name, token_prefix, created_at, last_used_at FROM api_tokens
+    sql: `SELECT id, name, token_prefix, created_at, last_used_at, scopes, expires_at FROM api_tokens
           WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at`,
     params: [userId],
   });
@@ -69,7 +88,43 @@ export async function listTokens(driver: SyncDriver, userId: string): Promise<To
     prefix: r.token_prefix,
     createdAt: r.created_at,
     lastUsedAt: r.last_used_at,
+    scopes: parseScopes(r.scopes),
+    expiresAt: r.expires_at,
   }));
+}
+
+export type TokenOptions = { scopes?: unknown; expiresInDays?: unknown };
+
+function parseTokenOptions(opts: TokenOptions, now: number): { scopes: Scope[]; expiresAt: number | null } {
+  let scopes = DEFAULT_SCOPES;
+  if (opts.scopes !== undefined) {
+    const list = opts.scopes;
+    if (
+      !Array.isArray(list) ||
+      list.length === 0 ||
+      !list.every((s) => typeof s === 'string' && (SCOPES as readonly string[]).includes(s))
+    ) {
+      throw new ExternalError(
+        'invalid_scopes',
+        400,
+        `scopes は ${SCOPES.join(' / ')} から1つ以上指定してください`,
+      );
+    }
+    scopes = SCOPES.filter((s) => list.includes(s));
+  }
+  let expiresAt: number | null = null;
+  const days = opts.expiresInDays;
+  if (days !== undefined && days !== null) {
+    if (typeof days !== 'number' || !Number.isSafeInteger(days) || days < 1 || days > MAX_EXPIRES_IN_DAYS) {
+      throw new ExternalError(
+        'invalid_expiry',
+        400,
+        `expiresInDays は 1〜${MAX_EXPIRES_IN_DAYS} の整数か null(無期限)にしてください`,
+      );
+    }
+    expiresAt = now + days * DAY_MS;
+  }
+  return { scopes, expiresAt };
 }
 
 /** 新しいトークンを発行する。返す `token` は平文で、この呼び出しでしか得られない */
@@ -78,11 +133,14 @@ export async function createToken(
   userId: string,
   rawName: unknown,
   now: number,
+  opts: TokenOptions = {},
 ): Promise<TokenInfo & { token: string }> {
   const name = typeof rawName === 'string' ? rawName.trim() : '';
   if (name.length === 0 || name.length > MAX_TOKEN_NAME) {
     throw new ExternalError('invalid_name', 400, `名前は1〜${MAX_TOKEN_NAME}文字で入力してください`);
   }
+  const { scopes, expiresAt } = parseTokenOptions(opts, now);
+  // 期限切れのキーも一覧に残り枠を使う(画面から失効して整理する)
   if ((await listTokens(driver, userId)).length >= MAX_ACTIVE_TOKENS) {
     throw new ExternalError('too_many_tokens', 409, `トークンは${MAX_ACTIVE_TOKENS}個までです`);
   }
@@ -91,12 +149,12 @@ export async function createToken(
   const prefix = token.slice(0, TOKEN_PREFIX.length + 6);
   await driver.batch([
     {
-      sql: `INSERT INTO api_tokens (id, user_id, name, token_hash, token_prefix, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)`,
-      params: [id, userId, name, await sha256Hex(token), prefix, now],
+      sql: `INSERT INTO api_tokens (id, user_id, name, token_hash, token_prefix, created_at, scopes, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [id, userId, name, await sha256Hex(token), prefix, now, scopes.join(','), expiresAt],
     },
   ]);
-  return { id, name, prefix, createdAt: now, lastUsedAt: null, token };
+  return { id, name, prefix, createdAt: now, lastUsedAt: null, scopes, expiresAt, token };
 }
 
 /** 自分のトークンだけを失効する。他人のID・存在しないIDは区別なく false */
@@ -120,14 +178,15 @@ export async function authenticateToken(
   driver: SyncDriver,
   authorization: string | undefined,
   now: number,
-): Promise<{ userId: string; tokenId: string } | null> {
+): Promise<{ userId: string; tokenId: string; scopes: Scope[] } | null> {
   const match = /^Bearer (tsn_[A-Za-z0-9_-]{20,100})$/.exec(authorization ?? '');
   if (!match) return null;
-  const rows = await driver.all<{ id: string; user_id: string }>({
-    sql: `SELECT t.id, t.user_id FROM api_tokens t JOIN user u ON u.id = t.user_id
+  const rows = await driver.all<{ id: string; user_id: string; scopes: string }>({
+    sql: `SELECT t.id, t.user_id, t.scopes FROM api_tokens t JOIN user u ON u.id = t.user_id
           WHERE t.token_hash = ? AND t.revoked_at IS NULL AND u.email_verified = 1
+            AND (t.expires_at IS NULL OR t.expires_at > ?)
             AND NOT EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = t.user_id)`,
-    params: [await sha256Hex(match[1]!)],
+    params: [await sha256Hex(match[1]!), now],
   });
   const row = rows[0];
   if (!row) return null;
@@ -135,7 +194,7 @@ export async function authenticateToken(
   await driver
     .batch([{ sql: 'UPDATE api_tokens SET last_used_at = ? WHERE id = ?', params: [now, row.id] }])
     .catch(() => undefined);
-  return { userId: row.user_id, tokenId: row.id };
+  return { userId: row.user_id, tokenId: row.id, scopes: parseScopes(row.scopes) };
 }
 
 /** トークン単位のレート制限(既存の rate_limit テーブルを使う)。超過なら false */
@@ -278,4 +337,135 @@ export async function recordExternalSession(
   const [result] = await pushChanges(driver, userId, [change]);
   if (!result || result.status === 'retry') throw new Error('retry');
   return { id, duplicate: false };
+}
+
+// ---- 読み取り(study_sessions:read)。対象は常にトークンの持ち主の学習記録だけ ----
+
+export function requireScope(scopes: Scope[], needed: Scope): void {
+  if (!scopes.includes(needed)) {
+    throw new ExternalError('insufficient_scope', 403, `このAPIキーには ${needed} の権限がありません`);
+  }
+}
+
+export type SessionView = {
+  id: string;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  folderId: string | null;
+};
+
+type StoredSession = { id: string; data: string };
+
+function toView(row: StoredSession): SessionView | null {
+  try {
+    const d = JSON.parse(row.data) as Record<string, unknown>;
+    if (typeof d.started_at !== 'number' || typeof d.ended_at !== 'number') return null;
+    return {
+      id: row.id,
+      startedAt: new Date(d.started_at).toISOString(),
+      endedAt: new Date(d.ended_at).toISOString(),
+      durationSeconds: typeof d.duration_seconds === 'number' ? d.duration_seconds : 0,
+      folderId: typeof d.folder_id === 'string' ? d.folder_id : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseRange(query: { from?: string; to?: string }, now: number, maxDays: number) {
+  const to = query.to === undefined ? now : parseTime(query.to, 'to');
+  const from = query.from === undefined ? to - 7 * DAY_MS : parseTime(query.from, 'from');
+  if (from >= to) throw new ExternalError('invalid_request', 400, 'from は to より前にしてください');
+  if (to - from > maxDays * DAY_MS) {
+    throw new ExternalError('invalid_request', 400, `期間は${maxDays}日までです`);
+  }
+  return { from, to };
+}
+
+/** 範囲内の自分の学習記録(削除済みを除く)。from <= startedAt < to */
+async function sessionsInRange(driver: SyncDriver, userId: string, from: number, to: number) {
+  const rows = await driver.all<StoredSession>({
+    sql: `SELECT id, data FROM sync_records
+          WHERE user_id = ? AND entity = 'study_sessions' AND deleted_at IS NULL
+            AND json_extract(data, '$.started_at') >= ? AND json_extract(data, '$.started_at') < ?`,
+    params: [userId, from, to],
+  });
+  return rows.flatMap((r) => toView(r) ?? []);
+}
+
+/**
+ * 学習記録の一覧(startedAt の降順)。既定は直近7日、期間は最大366日。
+ * カーソルは `<startedAtMs>:<id>` の不透明文字列。
+ */
+export async function listExternalSessions(
+  driver: SyncDriver,
+  userId: string,
+  query: { from?: string; to?: string; limit?: string; cursor?: string },
+  now: number,
+): Promise<{ sessions: SessionView[]; nextCursor: string | null }> {
+  const { from, to } = parseRange(query, now, 366);
+  let limit = 50;
+  if (query.limit !== undefined) {
+    limit = Number(query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_READ_LIMIT) {
+      throw new ExternalError('invalid_request', 400, `limit は 1〜${MAX_READ_LIMIT} の整数です`);
+    }
+  }
+  const all = (await sessionsInRange(driver, userId, from, to)).sort(
+    (a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id),
+  );
+  let start = 0;
+  if (query.cursor !== undefined) {
+    const m = /^(\d{1,15}):(.{1,64})$/.exec(query.cursor);
+    if (!m) throw new ExternalError('invalid_request', 400, 'cursor が不正です');
+    const key = new Date(Number(m[1])).toISOString();
+    start = all.findIndex((x) => x.startedAt < key || (x.startedAt === key && x.id < m[2]!));
+    if (start === -1) start = all.length;
+  }
+  const page = all.slice(start, start + limit);
+  const last = page.at(-1);
+  const hasMore = start + limit < all.length;
+  return {
+    sessions: page,
+    nextCursor: hasMore && last ? `${Date.parse(last.startedAt)}:${last.id}` : null,
+  };
+}
+
+/** 期間内の合計・日別・フォルダー別の学習時間。日の区切りは utcOffsetMinutes(日本は 540)で決める */
+export async function summarizeExternalSessions(
+  driver: SyncDriver,
+  userId: string,
+  query: { from?: string; to?: string; utcOffsetMinutes?: string },
+  now: number,
+) {
+  const { from, to } = parseRange(query, now, MAX_SUMMARY_DAYS);
+  let offset = 0;
+  if (query.utcOffsetMinutes !== undefined) {
+    offset = Number(query.utcOffsetMinutes);
+    if (!Number.isInteger(offset) || Math.abs(offset) > 14 * 60) {
+      throw new ExternalError('invalid_request', 400, 'utcOffsetMinutes は -840〜840 の整数です');
+    }
+  }
+  const sessions = await sessionsInRange(driver, userId, from, to);
+  const days = new Map<string, { totalSeconds: number; sessionCount: number }>();
+  const folders = new Map<string | null, number>();
+  let totalSeconds = 0;
+  for (const x of sessions) {
+    totalSeconds += x.durationSeconds;
+    const day = new Date(Date.parse(x.startedAt) + offset * 60_000).toISOString().slice(0, 10);
+    const d = days.get(day) ?? { totalSeconds: 0, sessionCount: 0 };
+    d.totalSeconds += x.durationSeconds;
+    d.sessionCount += 1;
+    days.set(day, d);
+    folders.set(x.folderId, (folders.get(x.folderId) ?? 0) + x.durationSeconds);
+  }
+  return {
+    from: new Date(from).toISOString(),
+    to: new Date(to).toISOString(),
+    totalSeconds,
+    sessionCount: sessions.length,
+    days: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({ date, ...v })),
+    folders: [...folders].map(([folderId, seconds]) => ({ folderId, totalSeconds: seconds })),
+  };
 }

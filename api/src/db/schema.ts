@@ -82,6 +82,10 @@ export const apiTokens = sqliteTable(
     createdAt: integer('created_at').notNull(),
     lastUsedAt: integer('last_used_at'),
     revokedAt: integer('revoked_at'),
+    /** カンマ区切りの権限(study_sessions:write / study_sessions:read)。migrations/0007 */
+    scopes: text('scopes').notNull().default('study_sessions:write'),
+    /** 有効期限(ms)。null は無期限 */
+    expiresAt: integer('expires_at'),
   },
   (t) => [index('api_tokens_user_id_idx').on(t.userId)],
 );

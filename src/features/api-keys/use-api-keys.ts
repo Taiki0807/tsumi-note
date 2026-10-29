@@ -4,7 +4,13 @@ import { authClient } from '@/features/auth/auth-client';
 import { useAuth } from '@/features/auth/auth-context';
 import { readAuthConfig } from '@/features/auth/config';
 
-import { createApiKeysApi, type ApiKeyInfo, type ApiKeyResult, type IssuedApiKey } from './api-keys-api';
+import {
+  createApiKeysApi,
+  type ApiKeyInfo,
+  type ApiKeyResult,
+  type IssueOptions,
+  type IssuedApiKey,
+} from './api-keys-api';
 
 export type ApiKeysState =
   { status: 'loading' } | { status: 'ready'; keys: ApiKeyInfo[] } | { status: 'error'; message: string };
@@ -43,9 +49,9 @@ export function useApiKeys() {
     };
   }, [api]);
 
-  const issue = async (name: string): Promise<ApiKeyResult<IssuedApiKey>> => {
+  const issue = async (name: string, options: IssueOptions): Promise<ApiKeyResult<IssuedApiKey>> => {
     if (!api) return { ok: false, kind: 'session_invalid', message: 'ログインが必要です。' };
-    const r = await api.issue(name.trim());
+    const r = await api.issue(name.trim(), options);
     if (r.ok) await refresh();
     return r;
   };

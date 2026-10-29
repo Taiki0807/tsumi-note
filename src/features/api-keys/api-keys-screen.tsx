@@ -8,10 +8,15 @@ import { fontFamily, typography, useTheme } from '@/design';
 import { SettingsScaffold } from '@/features/settings/settings-ui';
 
 import {
+  DEFAULT_EXPIRY_DAYS,
+  describeApiKeyAccess,
   describeApiKeyUsage,
+  EXPIRY_OPTIONS,
   MAX_API_KEY_NAME,
   maskedApiKey,
   type ApiKeyInfo,
+  type ApiKeyScope,
+  type IssueOptions,
   type IssuedApiKey,
 } from './api-keys-api';
 import { useApiKeys } from './use-api-keys';
@@ -78,6 +83,11 @@ function KeyRow({
         >
           {describeApiKeyUsage(keyInfo, now)}
         </Text>
+        <Text
+          style={{ fontFamily: fontFamily.bold, fontSize: 11, lineHeight: 16, color: colors.textPlaceholder }}
+        >
+          {describeApiKeyAccess(keyInfo, now)}
+        </Text>
       </View>
       <IconButton name="more" label={`${keyInfo.name}の操作`} onPress={onMore} />
     </View>
@@ -93,7 +103,7 @@ function IssueSheet({
 }: {
   visible: boolean;
   onClose: () => void;
-  onIssue: (name: string) => Promise<string | null>;
+  onIssue: (name: string, options: IssueOptions) => Promise<string | null>;
   onDismissed: () => void;
 }) {
   return (
@@ -103,24 +113,89 @@ function IssueSheet({
   );
 }
 
+function PermissionRow({
+  title,
+  caption,
+  checked,
+  onPress,
+}: {
+  title: string;
+  caption: string;
+  checked: boolean;
+  onPress: () => void;
+}) {
+  const colors = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      accessibilityLabel={title}
+      onPress={onPress}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}
+    >
+      <View
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 7,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: checked ? colors.primary : 'transparent',
+          borderWidth: checked ? 0 : 2,
+          borderColor: colors.divider,
+        }}
+      >
+        {checked && <Icon name="check" size={14} color={colors.textOnPrimary} strokeWidth={3} />}
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text
+          style={{
+            fontFamily: fontFamily.extraBold,
+            fontSize: 15,
+            lineHeight: 22,
+            color: colors.textPrimary,
+          }}
+        >
+          {title}
+        </Text>
+        <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
+          {caption}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 function IssueForm({
   onClose,
   onIssue,
 }: {
   onClose: () => void;
-  onIssue: (name: string) => Promise<string | null>;
+  onIssue: (name: string, options: IssueOptions) => Promise<string | null>;
 }) {
   const colors = useTheme();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Figma 16d: 「学習記録の追加」は初期ON、「学習記録の読み取り」は初期OFF。少なくとも1つは必要。
+  const [scopes, setScopes] = useState<ApiKeyScope[]>(['study_sessions:write']);
+  const [expiryIndex, setExpiryIndex] = useState(() =>
+    Math.max(
+      0,
+      EXPIRY_OPTIONS.findIndex((o) => o.days === DEFAULT_EXPIRY_DAYS),
+    ),
+  );
+  const expiry = EXPIRY_OPTIONS[expiryIndex]!;
   const trimmed = name.trim();
-  const valid = trimmed.length > 0 && trimmed.length <= MAX_API_KEY_NAME;
+  const valid = trimmed.length > 0 && trimmed.length <= MAX_API_KEY_NAME && scopes.length > 0;
+
+  const toggle = (scope: ApiKeyScope) =>
+    setScopes((cur) => (cur.includes(scope) ? cur.filter((s) => s !== scope) : [...cur, scope]));
 
   const submit = async () => {
     if (!valid || busy) return;
     setBusy(true);
-    const message = await onIssue(trimmed);
+    const message = await onIssue(trimmed, { scopes, expiresInDays: expiry.days });
     setBusy(false);
     if (message) setError(message);
   };
@@ -155,35 +230,39 @@ function IssueForm({
         <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.textPrimary }}>
           できること
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <View
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 7,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: colors.primary,
-            }}
-          >
-            <Icon name="check" size={14} color={colors.textOnPrimary} strokeWidth={3} />
-          </View>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text
-              style={{
-                fontFamily: fontFamily.extraBold,
-                fontSize: 15,
-                lineHeight: 22,
-                color: colors.textPrimary,
-              }}
-            >
-              学習記録の追加
-            </Text>
-            <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
-              時刻・フォルダー・学習時間を記録
-            </Text>
-          </View>
-        </View>
+        <PermissionRow
+          title="学習記録の追加"
+          caption="時刻・フォルダー・学習時間を記録"
+          checked={scopes.includes('study_sessions:write')}
+          onPress={() => toggle('study_sessions:write')}
+        />
+        <PermissionRow
+          title="学習記録の読み取り"
+          caption="週ごとの学習時間を取得"
+          checked={scopes.includes('study_sessions:read')}
+          onPress={() => toggle('study_sessions:read')}
+        />
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.textPrimary }}>
+          有効期限
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`有効期限 ${expiry.label}。タップで切り替え`}
+          onPress={() => setExpiryIndex((i) => (i + 1) % EXPIRY_OPTIONS.length)}
+          style={{
+            height: 39,
+            justifyContent: 'center',
+            paddingHorizontal: 14,
+            borderRadius: 999,
+            backgroundColor: colors.primarySoft,
+          }}
+        >
+          <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.primary }}>
+            {expiry.label}
+          </Text>
+        </Pressable>
       </View>
       {error && (
         <Text
@@ -472,8 +551,8 @@ export function ApiKeysScreen() {
       <IssueSheet
         visible={issuing}
         onClose={() => setIssuing(false)}
-        onIssue={async (name) => {
-          const r = await issue(name);
+        onIssue={async (name, options) => {
+          const r = await issue(name, options);
           if (!r.ok) return r.message;
           setIssued(r.data);
           setIssuing(false);

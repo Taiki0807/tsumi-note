@@ -1,4 +1,4 @@
-import { createApiKeysApi, describeApiKeyUsage, maskedApiKey } from './api-keys-api';
+import { createApiKeysApi, describeApiKeyAccess, describeApiKeyUsage, maskedApiKey } from './api-keys-api';
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -43,7 +43,36 @@ describe('api keys client', () => {
     );
     const r = await client.issue('ショートカット');
     expect(r.ok && r.data.token).toBe('tsn_zzzzzzSECRET');
-    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ name: 'ショートカット' });
+    // 権限を指定しない発行は、従来どおり登録専用・無期限
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      name: 'ショートカット',
+      scopes: ['study_sessions:write'],
+      expiresInDays: null,
+    });
+  });
+
+  it('sends the chosen scopes and expiry', async () => {
+    const { client, calls } = api(() =>
+      json(201, {
+        id: 'k3',
+        name: 'x',
+        prefix: 'tsn_aaaaaa',
+        createdAt: 1,
+        lastUsedAt: null,
+        token: 'tsn_T',
+      }),
+    );
+    await client.issue('x', { scopes: ['study_sessions:write', 'study_sessions:read'], expiresInDays: 90 });
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      name: 'x',
+      scopes: ['study_sessions:write', 'study_sessions:read'],
+      expiresInDays: 90,
+    });
+  });
+
+  it('maps invalid scopes / expiry to invalid_options', async () => {
+    const bad = await api(() => json(400, { error: 'invalid_expiry' })).client.issue('x');
+    expect(!bad.ok && bad.kind).toBe('invalid_options');
   });
 
   it('maps server errors to friendly kinds', async () => {
@@ -85,6 +114,22 @@ describe('describeApiKeyUsage', () => {
     );
     expect(describeApiKeyUsage({ createdAt: created, lastUsedAt: null }, now)).toBe(
       '作成 9/1 · 最終使用 未使用',
+    );
+  });
+
+  it('describes permissions and expiry, treating old responses as write-only', () => {
+    expect(describeApiKeyAccess({}, now)).toBe('登録');
+    expect(
+      describeApiKeyAccess(
+        {
+          scopes: ['study_sessions:write', 'study_sessions:read'],
+          expiresAt: new Date(2027, 0, 27).getTime(),
+        },
+        now,
+      ),
+    ).toBe('登録 · 読み取り · 期限 1/27');
+    expect(describeApiKeyAccess({ scopes: ['study_sessions:read'], expiresAt: now - 1 }, now)).toBe(
+      '読み取り · 期限切れ',
     );
   });
 

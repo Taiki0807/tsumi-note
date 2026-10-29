@@ -11,7 +11,24 @@ export type ApiKeyInfo = {
   prefix: string;
   createdAt: number;
   lastUsedAt: number | null;
+  /** 権限。サーバーが未対応の古い応答では登録だけとみなす */
+  scopes?: ApiKeyScope[];
+  /** 有効期限(ms)。null / 未指定は無期限 */
+  expiresAt?: number | null;
 };
+
+export type ApiKeyScope = 'study_sessions:write' | 'study_sessions:read';
+
+/** Figma 16d 「有効期限」の選択肢(日数)。null は無期限 */
+export const EXPIRY_OPTIONS: { days: number | null; label: string }[] = [
+  { days: 30, label: '30日' },
+  { days: 90, label: '90日' },
+  { days: 365, label: '1年' },
+  { days: null, label: '無期限' },
+];
+export const DEFAULT_EXPIRY_DAYS = 90;
+
+export type IssueOptions = { scopes: ApiKeyScope[]; expiresInDays: number | null };
 
 export type IssuedApiKey = ApiKeyInfo & {
   /** 平文のキー。発行直後の1回しか得られない */
@@ -19,7 +36,13 @@ export type IssuedApiKey = ApiKeyInfo & {
 };
 
 export type ApiKeyFailureKind =
-  'invalid_name' | 'too_many_keys' | 'not_found' | 'session_invalid' | 'network' | 'unknown';
+  | 'invalid_name'
+  | 'invalid_options'
+  | 'too_many_keys'
+  | 'not_found'
+  | 'session_invalid'
+  | 'network'
+  | 'unknown';
 
 export type ApiKeyResult<T> = { ok: true; data: T } | { ok: false; kind: ApiKeyFailureKind; message: string };
 
@@ -27,6 +50,7 @@ export const MAX_API_KEY_NAME = 50;
 
 const MESSAGES: Record<ApiKeyFailureKind, string> = {
   invalid_name: `名前は1〜${MAX_API_KEY_NAME}文字で入力してください。`,
+  invalid_options: '権限または有効期限の指定が正しくありません。',
   too_many_keys: 'APIキーは5個まで発行できます。不要なキーを失効してから、もう一度お試しください。',
   not_found: 'このAPIキーはすでに失効しています。',
   session_invalid: 'ログインの有効期限が切れています。ログインし直してください。',
@@ -75,6 +99,7 @@ export function createApiKeysApi({ baseUrl, getCookie, fetchImpl = fetch, timeou
       code = undefined;
     }
     if (code === 'invalid_name') return 'invalid_name';
+    if (code === 'invalid_scopes' || code === 'invalid_expiry') return 'invalid_options';
     if (code === 'too_many_tokens') return 'too_many_keys';
     if (res.status === 404) return 'not_found';
     return 'unknown';
@@ -93,8 +118,15 @@ export function createApiKeysApi({ baseUrl, getCookie, fetchImpl = fetch, timeou
       }
     },
 
-    async issue(name: string): Promise<ApiKeyResult<IssuedApiKey>> {
-      const r = await call('POST', '/v1/api-tokens', { name });
+    async issue(
+      name: string,
+      options: IssueOptions = { scopes: ['study_sessions:write'], expiresInDays: null },
+    ): Promise<ApiKeyResult<IssuedApiKey>> {
+      const r = await call('POST', '/v1/api-tokens', {
+        name,
+        scopes: options.scopes,
+        expiresInDays: options.expiresInDays,
+      });
       if ('kind' in r) return fail(r.kind);
       if (!r.res.ok) return fail(await errorKind(r.res));
       try {
@@ -132,6 +164,23 @@ function formatAgo(elapsedMs: number): string {
   if (hours < 24) return `${hours}時間前`;
   const days = Math.floor(hours / 24);
   return days === 1 ? '昨日' : `${days}日前`;
+}
+
+/** 「読み取り · 書き込み · 期限 1/27」。期限切れは「期限切れ」。一覧の補足に使う */
+export function describeApiKeyAccess(key: Pick<ApiKeyInfo, 'scopes' | 'expiresAt'>, now: number): string {
+  const scopes = key.scopes ?? ['study_sessions:write'];
+  const parts = [
+    scopes.includes('study_sessions:write') ? '登録' : null,
+    scopes.includes('study_sessions:read') ? '読み取り' : null,
+  ].filter((p): p is string => p !== null);
+  if (key.expiresAt != null) {
+    if (key.expiresAt <= now) parts.push('期限切れ');
+    else {
+      const d = new Date(key.expiresAt);
+      parts.push(`期限 ${d.getMonth() + 1}/${d.getDate()}`);
+    }
+  }
+  return parts.join(' · ');
 }
 
 /** 一覧に出す伏せ字付きの表記(例 `tsn_AbCdEf••••`)。平文の残りは持たないので、これ以上は表示しない */
