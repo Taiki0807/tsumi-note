@@ -1,6 +1,8 @@
 import type { ConfigContext } from 'expo/config';
 
-import withConfig, { googleReverseScheme, mergeUrlTypes } from './app.config';
+import type { XcodeProject } from 'expo/config-plugins';
+
+import withConfig, { applyJapaneseProject, googleReverseScheme, mergeUrlTypes } from './app.config';
 
 const GOOGLE = 'com.googleusercontent.apps.123-abc';
 
@@ -24,10 +26,7 @@ describe('mergeUrlTypes', () => {
     expect(mergeUrlTypes(undefined, 'tsumi-note', null)).toBeUndefined();
   });
   it('scheme が文字列でも tsumi-note と Google が共存する', () => {
-    expect(schemesOf(mergeUrlTypes(undefined, 'tsumi-note', GOOGLE))).toEqual([
-      'tsumi-note',
-      GOOGLE,
-    ]);
+    expect(schemesOf(mergeUrlTypes(undefined, 'tsumi-note', GOOGLE))).toEqual(['tsumi-note', GOOGLE]);
   });
   it('scheme が配列でも共存する', () => {
     expect(schemesOf(mergeUrlTypes(undefined, ['tsumi-note', 'other'], GOOGLE))).toEqual([
@@ -87,9 +86,58 @@ describe('マイク・カメラ権限', () => {
   it('expo-image-picker はマイク・カメラ権限を要求しない(Info.plist に NSMicrophoneUsageDescription を出さない)', () => {
     const { expo } = require('./app.json') as { expo: { plugins: unknown[] } };
     const entry = expo.plugins.find((p) => Array.isArray(p) && p[0] === 'expo-image-picker') as
-      | [string, Record<string, unknown>]
-      | undefined;
+      [string, Record<string, unknown>] | undefined;
     expect(entry?.[1].microphonePermission).toBe(false);
     expect(entry?.[1].cameraPermission).toBe(false);
+  });
+});
+
+describe('Face ID 権限', () => {
+  it('expo-secure-store は Face ID 権限を出さない(生体認証を使っていないため)', () => {
+    const { expo } = require('./app.json') as { expo: { plugins: unknown[] } };
+    const entry = expo.plugins.find((p) => Array.isArray(p) && p[0] === 'expo-secure-store') as
+      [string, Record<string, unknown>] | undefined;
+    expect(entry?.[1].faceIDPermission).toBe(false);
+  });
+});
+
+describe('applyJapaneseProject', () => {
+  const makeProject = () =>
+    ({
+      hash: {
+        project: {
+          objects: {
+            PBXProject: {
+              ROOT: { developmentRegion: 'en', knownRegions: ['en', 'Base'] },
+              ROOT_comment: 'Project object',
+            },
+            XCBuildConfiguration: {
+              PROJ: { buildSettings: { SDKROOT: 'iphoneos' } },
+              PROJ_comment: 'Release',
+              APP: { buildSettings: { PRODUCT_NAME: 'app' } },
+              APP_comment: 'Release',
+            },
+          },
+        },
+      },
+    }) as unknown as XcodeProject;
+
+  it('開発言語を ja にし、knownRegions から en を外す', () => {
+    const objects = applyJapaneseProject(makeProject(), 'つみノート').hash.project.objects;
+    expect(objects.PBXProject.ROOT.developmentRegion).toBe('ja');
+    expect(objects.PBXProject.ROOT.knownRegions).toEqual(['ja', 'Base']);
+  });
+  it('アプリ target にだけ Display Name を設定する', () => {
+    const objects = applyJapaneseProject(makeProject(), 'つみノート').hash.project.objects;
+    expect(objects.XCBuildConfiguration.APP.buildSettings.INFOPLIST_KEY_CFBundleDisplayName).toBe(
+      '"つみノート"',
+    );
+    expect(objects.XCBuildConfiguration.PROJ.buildSettings.INFOPLIST_KEY_CFBundleDisplayName).toBeUndefined();
+  });
+  it('locales で追加された他の言語は残す', () => {
+    const project = makeProject();
+    project.hash.project.objects.PBXProject.ROOT.knownRegions = ['en', 'Base', 'ja', 'zh-Hans'];
+    const objects = applyJapaneseProject(project, 'つみノート').hash.project.objects;
+    expect(objects.PBXProject.ROOT.knownRegions).toEqual(['ja', 'Base', 'zh-Hans']);
   });
 });

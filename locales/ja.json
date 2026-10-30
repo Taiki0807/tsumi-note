@@ -1,0 +1,6 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "つみノート",
+    "NSPhotoLibraryUsageDescription": "ノートに挿入する画像を選ぶために、写真ライブラリへアクセスします。"
+  }
+}
