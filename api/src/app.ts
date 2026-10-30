@@ -8,6 +8,20 @@ import {
   listProviders,
 } from './account/service';
 import type { Auth } from './auth';
+import {
+  authenticateToken,
+  consumeExternalRate,
+  createToken,
+  ExternalError,
+  listExternalSessions,
+  listTokens,
+  parseExternalSession,
+  recordExternalSession,
+  requireScope,
+  revokeToken,
+  summarizeExternalSessions,
+  type Scope,
+} from './external/service';
 import { deleteImage, getImage, putImage, type ObjectStore } from './images/service';
 import { ImageError, MAX_IMAGE_BYTES, readBodyWithLimit } from './images/validate';
 import { pullChanges, pushChanges, type SyncDriver } from './sync/service';
@@ -45,6 +59,8 @@ export function stripCredentialsFromRedirect(res: Response): Response {
   }
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
+
+const MAX_EXTERNAL_BODY_CHARS = 4096;
 
 export type AppVariables = {
   userId: string;
@@ -95,7 +111,11 @@ export function createApp(
     // (他端末からの再同期・再アップロードを遮断)。削除の再試行は引き続きパスワード/直近ログインで本人確認する
     const isAccountEndpoint =
       c.req.path === '/v1/account' && (c.req.method === 'GET' || c.req.method === 'DELETE');
-    if (getSyncDriver && !isAccountEndpoint && (await isDeletionRequested(getSyncDriver(), session.user.id))) {
+    if (
+      getSyncDriver &&
+      !isAccountEndpoint &&
+      (await isDeletionRequested(getSyncDriver(), session.user.id))
+    ) {
       return c.json({ error: 'account_deleted' }, 401);
     }
     await next();
@@ -186,10 +206,106 @@ export function createApp(
     }
   });
 
+  // ---- 外部サービス連携のトークン管理(ログイン中のセッションのみ。トークン自身では管理できない) ----
+  app.get('/v1/api-tokens', async (c) => c.json({ tokens: await listTokens(syncDriver(), c.get('userId')) }));
+
+  app.post('/v1/api-tokens', async (c) => {
+    let body: { name?: unknown; scopes?: unknown; expiresInDays?: unknown } = {};
+    try {
+      body = (await c.req.json()) ?? {};
+    } catch {
+      return c.json({ error: 'invalid_request' }, 400);
+    }
+    try {
+      const created = await createToken(syncDriver(), c.get('userId'), body.name, Date.now(), {
+        scopes: body.scopes,
+        expiresInDays: body.expiresInDays,
+      });
+      // 平文のトークンはこの応答でしか返さない
+      return c.json(created, 201, { 'cache-control': 'no-store' });
+    } catch (e) {
+      return externalError(c, e);
+    }
+  });
+
+  app.delete('/v1/api-tokens/:id', async (c) => {
+    const revoked = await revokeToken(syncDriver(), c.get('userId'), c.req.param('id'), Date.now());
+    if (!revoked) return c.json({ error: 'not_found' }, 404);
+    return c.json({ revoked: true });
+  });
+
+  // ---- 外部サービス連携API。認証はAPIトークン。権限(scope)ごとに使えるAPIが決まる ----
+  // 認証 → レート制限 → 権限 の順。成功すると持ち主のIDだけを返し、以降はこのIDの範囲でしか読み書きしない
+  const authorizeExternal = async (c: Context, scope: Scope) => {
+    const driver = syncDriver();
+    const now = Date.now();
+    const auth = await authenticateToken(driver, c.req.header('authorization'), now);
+    if (!auth) {
+      return { res: c.json({ error: 'unauthorized' }, 401, { 'www-authenticate': 'Bearer' }) };
+    }
+    if (!(await consumeExternalRate(driver, auth.tokenId, now))) {
+      return { res: c.json({ error: 'rate_limited' }, 429, { 'retry-after': '60' }) };
+    }
+    try {
+      requireScope(auth.scopes, scope);
+    } catch (e) {
+      return { res: externalError(c, e) };
+    }
+    return { driver, now, userId: auth.userId };
+  };
+
+  app.get('/external/v1/study-sessions', async (c) => {
+    const a = await authorizeExternal(c, 'study_sessions:read');
+    if ('res' in a) return a.res;
+    try {
+      const q = c.req.query();
+      const page = await listExternalSessions(a.driver, a.userId, q, a.now);
+      return c.json(page, 200, { 'cache-control': 'private, no-store' });
+    } catch (e) {
+      return externalError(c, e);
+    }
+  });
+
+  app.get('/external/v1/study-summary', async (c) => {
+    const a = await authorizeExternal(c, 'study_sessions:read');
+    if ('res' in a) return a.res;
+    try {
+      const summary = await summarizeExternalSessions(a.driver, a.userId, c.req.query(), a.now);
+      return c.json(summary, 200, { 'cache-control': 'private, no-store' });
+    } catch (e) {
+      return externalError(c, e);
+    }
+  });
+
+  app.post('/external/v1/study-sessions', async (c) => {
+    const a = await authorizeExternal(c, 'study_sessions:write');
+    if ('res' in a) return a.res;
+    const { driver, now } = a;
+    const auth = { userId: a.userId };
+    if (Number(c.req.header('content-length') ?? 0) > MAX_EXTERNAL_BODY_CHARS) {
+      return c.json({ error: 'payload_too_large' }, 413);
+    }
+    const text = await c.req.text();
+    if (text.length > MAX_EXTERNAL_BODY_CHARS) return c.json({ error: 'payload_too_large' }, 413);
+    try {
+      const input = parseExternalSession(JSON.parse(text), now);
+      const { id, duplicate } = await recordExternalSession(driver, auth.userId, input, now);
+      return c.json({ id, duplicate }, duplicate ? 200 : 201);
+    } catch (e) {
+      if (e instanceof SyntaxError)
+        return c.json({ error: 'invalid_request', message: 'JSONが不正です' }, 400);
+      return externalError(c, e);
+    }
+  });
+
   // ---- ノート画像(R2)。ユーザーは常にセッション由来。オブジェクトキーはサーバーが決める ----
   const imageDeps = () => {
     if (!getImageStore) throw new Error('images are not configured');
     return { driver: syncDriver(), store: getImageStore() };
+  };
+  const externalError = (c: Context, e: unknown) => {
+    if (e instanceof ExternalError) return c.json({ error: e.code, message: e.message }, e.status);
+    throw e;
   };
   const imageError = (c: Context, e: unknown) => {
     if (e instanceof ImageError) return c.json({ error: e.code }, e.status);

@@ -4,9 +4,12 @@ import {
   describeReminder,
   parseDarkMode,
   parseReminder,
+  parseTimerAlerts,
   serializeReminder,
+  serializeTimerAlerts,
   type DarkModeSetting,
   type ReminderSettings,
+  type TimerAlertSettings,
 } from '@/domain/app-settings';
 import {
   applyPlanEdit,
@@ -181,6 +184,15 @@ export function loadTimerSettings(repos: Repositories): TimerSettings {
 /** Clamped and persisted; a running session keeps its snapshot and the new values apply from the next start. */
 export function saveTimerSettings(repos: Repositories, input: TimerSettings): TimerSettings {
   return createTimerStorage(repos).saveSettings(input);
+}
+
+export function loadTimerAlerts({ settings }: SettingsRepos): TimerAlertSettings {
+  return parseTimerAlerts((key) => settings.get(key));
+}
+
+export function saveTimerAlerts({ settings }: SettingsRepos, alerts: TimerAlertSettings): TimerAlertSettings {
+  for (const [key, value] of Object.entries(serializeTimerAlerts(alerts))) settings.set(key, value);
+  return alerts;
 }
 
 export function describeTimerSettings(timer: TimerSettings): string {

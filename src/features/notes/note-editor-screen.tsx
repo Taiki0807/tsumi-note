@@ -9,14 +9,16 @@ import {
   ScrollView,
   Text,
   TextInput,
+  type TextInputInstance,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, EmptyState, IconButton } from '@/components/form-ui';
+import { Button, ConfirmDeleteSheet, EmptyState, IconButton } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, typography, useTheme } from '@/design';
 import { removeSegmentLine, splitEditorSegments, toggleChecklistLine } from '@/domain/markdown';
+import { toNFC } from '@/domain/text';
 import {
   applyBlock,
   currentHeadingLevel,
@@ -34,6 +36,7 @@ import { FolderPickerSheet } from '@/features/timer/folder-picker-sheet';
 import { MarkdownView, NoteImage } from './markdown-view';
 import { formatNoteTime, noteDisplayTitle } from './note-format';
 import { useFolderTone } from './folder-tone';
+import { NoteMenuSheet } from './note-menu-sheet';
 import { OptionSheet, type SheetOption } from './option-sheet';
 import { useNoteEditor } from './use-notes';
 
@@ -129,7 +132,7 @@ export function NoteEditorScreen() {
   const selection = useRef<Selection>({ start: body.length, end: body.length });
   // Selection to push into one text segment (index + range local to that segment).
   const [sel, setSel] = useState<{ seg: number; range: Selection } | undefined>(undefined);
-  const segmentInputs = useRef<(TextInput | null)[]>([]);
+  const segmentInputs = useRef<(TextInputInstance | null)[]>([]);
   // Images are shown as images while editing; the Markdown body stays the only stored content.
   const segments = splitEditorSegments(body);
   const focusSegment = (index: number | undefined) =>
@@ -224,41 +227,20 @@ export function NoteEditorScreen() {
     setEditingBody(false);
   };
 
-  const confirmDelete = () =>
-    Alert.alert('このノートを削除しますか？', noteDisplayTitle(title), [
-      { text: 'キャンセル', style: 'cancel' },
-      {
-        text: '削除',
-        style: 'destructive',
-        onPress: () => {
-          clearTimeout(timer.current);
-          dirty.current = false;
-          if (noteId.current) editor.deleteNote(noteId.current);
-          router.back();
-        },
-      },
-    ]);
-
-  const openMenu = () => {
-    const id = noteId.current;
-    Alert.alert(noteDisplayTitle(title), undefined, [
-      ...(id
-        ? [
-            {
-              text: pinned ? 'ピン留めを解除' : 'ピン留め',
-              onPress: () => {
-                flush();
-                editor.setPinned(id, !pinned);
-                setPinned(!pinned);
-              },
-            },
-          ]
-        : []),
-      { text: '科目を変更', onPress: () => setPickingFolder(true) },
-      { text: '削除', style: 'destructive' as const, onPress: id ? confirmDelete : () => router.back() },
-      { text: 'キャンセル', style: 'cancel' as const },
-    ]);
+  // Same confirmation sheet as the folder / question deletes (Figma 06b / 08c).
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmDelete = () => setConfirmingDelete(true);
+  const deleteNow = () => {
+    setConfirmingDelete(false);
+    clearTimeout(timer.current);
+    dirty.current = false;
+    if (noteId.current) editor.deleteNote(noteId.current);
+    router.back();
   };
+
+  // Figma 03b ノートのメニュー (NoteMenuSheet).
+  const [menuOpen, setMenuOpen] = useState(false);
+  const openMenu = () => setMenuOpen(true);
 
   if (routeId && !detail) {
     // Deleted (or never existed): nothing to edit but a way back.
@@ -334,7 +316,7 @@ export function NoteEditorScreen() {
           <TextInput
             accessibilityLabel="タイトル"
             value={title}
-            onChangeText={updateTitle}
+            onChangeText={(value) => updateTitle(toNFC(value))}
             placeholder="タイトル"
             placeholderTextColor={colors.textPlaceholder}
             returnKeyType="next"
@@ -366,7 +348,9 @@ export function NoteEditorScreen() {
               }}
             >
               <Icon name="folder" size={16} color={colors.textPrimary} strokeWidth={1.8} />
-              <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: folderTone.label }}>
+              <Text
+                style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: folderTone.label }}
+              >
                 {folder?.name ?? '未分類'}
               </Text>
             </Pressable>
@@ -418,7 +402,7 @@ export function NoteEditorScreen() {
                   accessibilityLabel="Markdown本文"
                   value={segment.text}
                   onChangeText={(value) =>
-                    updateBody(body.slice(0, segment.start) + value + body.slice(segment.end))
+                    updateBody(body.slice(0, segment.start) + toNFC(value) + body.slice(segment.end))
                   }
                   selection={sel?.seg === i ? sel.range : undefined}
                   onSelectionChange={(e) => {
@@ -568,12 +552,39 @@ export function NoteEditorScreen() {
         onSelect={applyBlockOption}
         onClose={() => setSheet(null)}
       />
+      <NoteMenuSheet
+        visible={menuOpen}
+        title={noteDisplayTitle(title)}
+        pinned={pinned}
+        onTogglePin={
+          // `updatedAt` is set once the note exists in the database (nothing to pin before that).
+          updatedAt === undefined
+            ? undefined
+            : () => {
+                flush();
+                if (noteId.current) editor.setPinned(noteId.current, !pinned);
+                setPinned(!pinned);
+              }
+        }
+        onChangeFolder={() => setPickingFolder(true)}
+        onDelete={() => (noteId.current ? confirmDelete() : router.back())}
+        onClose={() => setMenuOpen(false)}
+      />
       <FolderPickerSheet
         visible={pickingFolder}
+        title="科目を変更"
+        subtitle={null}
         folders={folders}
         selectedId={folderId}
         onSelect={updateFolder}
         onClose={() => setPickingFolder(false)}
+      />
+      <ConfirmDeleteSheet
+        visible={confirmingDelete}
+        title="ノートを削除しますか？"
+        message={`「${noteDisplayTitle(title)}」を削除します。この操作は取り消せません。`}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={deleteNow}
       />
     </KeyboardAvoidingView>
   );

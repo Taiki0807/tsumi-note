@@ -1,7 +1,11 @@
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 
-import { REMINDER_NOTIFICATION_ID } from '@/domain/app-settings';
+import {
+  DEFAULT_TIMER_ALERTS,
+  REMINDER_NOTIFICATION_ID,
+  type TimerAlertSettings,
+} from '@/domain/app-settings';
 
 import type { TimerEvent, TimerState } from './timer-logic';
 import { createNotificationSynchronizer } from './timer-notification-sync';
@@ -12,12 +16,20 @@ const MESSAGES: Record<TimerEvent, { title: string; body: string }> = {
   allDone: { title: 'すべてのラウンドが完了しました', body: 'おつかれさまでした。' },
 };
 
-// In the foreground the user sees the screen and feels a haptic; the OS banner is only for background.
+/** Current 通知音 / バイブレーション choice (マイページ › 通知). Synced from storage by the timer hook. */
+let alerts: TimerAlertSettings = DEFAULT_TIMER_ALERTS;
+
+export function configureTimerAlerts(next: TimerAlertSettings): void {
+  alerts = next;
+}
+
+// In the foreground the user sees the screen, so no banner. Sound follows the setting (and, like any
+// notification sound, the iOS silent switch / Focus); the haptic is played by `notifyHaptic`.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
+  handleNotification: async (notification) => ({
     shouldShowBanner: false,
     shouldShowList: false,
-    shouldPlaySound: false,
+    shouldPlaySound: alerts.sound && notification.request.identifier !== REMINDER_NOTIFICATION_ID,
     shouldSetBadge: false,
   }),
 });
@@ -47,7 +59,7 @@ const synchronizer = createNotificationSynchronizer({
   hasPermission: async () => (await Notifications.getPermissionsAsync()).granted,
   schedule: async (at, event) => {
     await Notifications.scheduleNotificationAsync({
-      content: { ...MESSAGES[event], sound: true },
+      content: { ...MESSAGES[event], sound: alerts.sound },
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(at) },
     });
   },
@@ -59,6 +71,7 @@ export function syncTimerNotifications(state: TimerState, now: number): Promise<
 }
 
 export function notifyHaptic(event: TimerEvent): void {
+  if (!alerts.vibration) return;
   const type =
     event === 'allDone' ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning;
   Haptics.notificationAsync(type).catch(() => undefined);

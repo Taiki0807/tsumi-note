@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from 'react';
+import { useEffect, useRef, type ReactNode, type Ref } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -7,12 +7,14 @@ import {
   ScrollView,
   Text,
   TextInput,
+  type TextInputInstance,
   View,
   type TextInputProps,
 } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { toNFC } from '@/domain/text';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 
 import { Icon, type IconName } from './icons';
@@ -123,7 +125,7 @@ export function SearchField({
   value: string;
   onChangeText: (text: string) => void;
   placeholder: string;
-  inputRef?: Ref<TextInput>;
+  inputRef?: Ref<TextInputInstance>;
 }) {
   const colors = useTheme();
   return (
@@ -143,7 +145,7 @@ export function SearchField({
         ref={inputRef}
         accessibilityLabel={placeholder}
         value={value}
-        onChangeText={onChangeText}
+        onChangeText={(text) => onChangeText(toNFC(text))}
         placeholder={placeholder}
         placeholderTextColor={colors.textSecondary}
         returnKeyType="search"
@@ -167,11 +169,18 @@ export function SearchField({
 export function TextField({
   label,
   multiline,
+  fill,
   ...inputProps
-}: { label: string; multiline?: boolean } & Omit<TextInputProps, 'style' | 'multiline'>) {
+}: {
+  label: string;
+  multiline?: boolean;
+  /** Multiline only: grow to the space the parent gives (full-screen editors) instead of 100pt. */
+  fill?: boolean;
+} & Omit<TextInputProps, 'style' | 'multiline'>) {
   const colors = useTheme();
+  const grow = !!multiline && !!fill;
   return (
-    <View style={{ gap: 8 }}>
+    <View style={{ gap: 8, flex: grow ? 1 : undefined }}>
       <Text style={{ fontFamily: fontFamily.extraBold, ...typography.bodySm, color: colors.textPrimary }}>
         {label}
       </Text>
@@ -181,7 +190,8 @@ export function TextField({
         multiline={multiline}
         textAlignVertical={multiline ? 'top' : 'center'}
         style={{
-          height: multiline ? 100 : 52,
+          flex: grow ? 1 : undefined,
+          height: grow ? undefined : multiline ? 100 : 52,
           paddingHorizontal: 16,
           paddingVertical: multiline ? 14 : 0,
           borderWidth: 1.5,
@@ -194,6 +204,7 @@ export function TextField({
           color: colors.textPrimary,
         }}
         {...inputProps}
+        onChangeText={inputProps.onChangeText && ((text) => inputProps.onChangeText?.(toNFC(text)))}
       />
     </View>
   );
@@ -208,17 +219,32 @@ export function BottomSheet({
   onClose,
   children,
   gap = 20,
+  onDismissed,
 }: {
   visible: boolean;
   onClose: () => void;
   children: ReactNode;
   /** Vertical gap between sections: 20 for forms, 16 for confirmation sheets (Figma 06b / 08c). */
   gap?: number;
+  /**
+   * Called once the sheet's Modal has fully unmounted after closing. Open a follow-up Modal from here:
+   * iOS ignores a Modal presented while another one is still dismissing.
+   */
+  onDismissed?: () => void;
 }) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   // Open/close animation, backdrop fade and grabber drag are shared with the timer settings sheet.
   const { mounted, panHandlers, backdropStyle, sheetStyle } = useSheetMotion({ visible, onClose });
+  const wasMounted = useRef(false);
+  const dismissed = useRef(onDismissed);
+  useEffect(() => {
+    dismissed.current = onDismissed;
+  });
+  useEffect(() => {
+    if (wasMounted.current && !mounted) dismissed.current?.();
+    wasMounted.current = mounted;
+  }, [mounted]);
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <KeyboardAvoidingView

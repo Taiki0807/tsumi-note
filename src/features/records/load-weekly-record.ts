@@ -33,10 +33,16 @@ export function loadWeeklyRecord(
 ): WeeklyRecordView {
   const sessions = studySessions.listBetween(addWeeks(weekStart, -1), addWeeks(weekStart, 1));
   const answers = review.listAnswersBetween(weekStart, addWeeks(weekStart, 1), folderId);
+  const folderList = folders.list().map(({ id, name }) => ({ id, name }));
   return {
-    record: buildWeeklyRecord(sessions, weekStart, folderId),
+    record: buildWeeklyRecord(
+      sessions,
+      weekStart,
+      folderId,
+      folderList.map((f) => f.id),
+    ),
     understanding: buildUnderstanding(answers, weekStart),
     needsReview: buildNeedsReview(answers, weekStart),
-    folders: folders.list().map(({ id, name }) => ({ id, name })),
+    folders: folderList,
   };
 }

@@ -68,6 +68,28 @@ export const verification = sqliteTable(
   (t) => [index('verification_identifier_idx').on(t.identifier)],
 );
 
+/** 外部サービス連携用の個人APIトークン(ハッシュのみ保存。migrations/0006_api_tokens.sql) */
+export const apiTokens = sqliteTable(
+  'api_tokens',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    tokenHash: text('token_hash').notNull().unique(),
+    tokenPrefix: text('token_prefix').notNull(),
+    createdAt: integer('created_at').notNull(),
+    lastUsedAt: integer('last_used_at'),
+    revokedAt: integer('revoked_at'),
+    /** カンマ区切りの権限(study_sessions:write / study_sessions:read)。migrations/0007 */
+    scopes: text('scopes').notNull().default('study_sessions:write'),
+    /** 有効期限(ms)。null は無期限 */
+    expiresAt: integer('expires_at'),
+  },
+  (t) => [index('api_tokens_user_id_idx').on(t.userId)],
+);
+
 /** レート制限カウンタ。Workers はisolateが分散するためメモリではなくD1に保存する。 */
 export const rateLimit = sqliteTable('rate_limit', {
   id: text('id').primaryKey(),

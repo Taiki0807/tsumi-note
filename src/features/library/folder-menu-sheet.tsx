@@ -4,7 +4,7 @@ import { BottomSheet, Button } from '@/components/form-ui';
 import { Icon, type IconName } from '@/components/icons';
 import { fontFamily, radius, typography, useTheme } from '@/design';
 
-function MenuItem({
+export function MenuItem({
   icon,
   label,
   danger,

@@ -253,10 +253,14 @@ describe('デプロイ設定', () => {
     expect(config.env.production.vars.BETTER_AUTH_URL.startsWith('https://')).toBe(true);
   });
 
-  test('現在のwrangler.toml(ダミー値あり)は本番デプロイ前チェックで止まる', () => {
-    expect(checkProductionConfig(config).length).toBeGreaterThan(0);
-    // ダミー値を許可すれば構造上の問題はない
+  test('現在のwrangler.tomlは本番デプロイ前チェックを通る(ダミー値が残っていない)', () => {
+    expect(checkProductionConfig(config)).toEqual([]);
     expect(checkProductionConfig(config, { allowPlaceholders: true })).toEqual([]);
+  });
+
+  test('db:migrate:remote が指すD1名は、wrangler.toml の本番D1名と一致する', () => {
+    const name = config.env.production.d1_databases[0].database_name as string;
+    expect(pkg.scripts['db:migrate:remote']).toContain(`migrations apply ${name} `);
   });
 
   test('開発設定が本番に混入した設定はチェックで検出される', () => {

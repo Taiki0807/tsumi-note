@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -5,6 +6,7 @@ import { AppIcon } from '@/components/app-icon';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 
+import { useFolderColors } from './folder-colors';
 import {
   chartMaxHours,
   formatDayLabel,
@@ -23,7 +25,17 @@ import { useWeeklyRecord } from './use-weekly-record';
 const CHART_HEIGHT = 120;
 const BAR_WIDTH = 24;
 
-function WeekChart({ days, maxHours, today }: { days: DayRecord[]; maxHours: number; today: number }) {
+function WeekChart({
+  days,
+  maxHours,
+  today,
+  colorFor,
+}: {
+  days: DayRecord[];
+  maxHours: number;
+  today: number;
+  colorFor: (folderId: string | null) => string;
+}) {
   const colors = useTheme();
   const gridLines = [maxHours, maxHours / 2, 0];
 
@@ -64,7 +76,14 @@ function WeekChart({ days, maxHours, today }: { days: DayRecord[]; maxHours: num
           const height = (day.seconds / 3600 / maxHours) * CHART_HEIGHT;
           const label = formatDayLabel(day.seconds);
           return (
-            <View key={day.dayStart} style={{ flex: 1, alignItems: 'center' }}>
+            // Tapping a day opens its time-by-time records (Figma 02b).
+            <Pressable
+              key={day.dayStart}
+              accessibilityRole="button"
+              accessibilityLabel={`${WEEKDAY_LABELS[day.weekdayIndex]}曜日の記録を開く`}
+              onPress={() => router.push({ pathname: '/records/day', params: { day: String(day.dayStart) } })}
+              style={{ flex: 1, alignItems: 'center' }}
+            >
               <View style={{ height: CHART_HEIGHT, justifyContent: 'flex-end' }}>
                 {label && (
                   <Text
@@ -80,15 +99,27 @@ function WeekChart({ days, maxHours, today }: { days: DayRecord[]; maxHours: num
                     {label}
                   </Text>
                 )}
+                {/* Stacked by folder (v1.1.0): each segment uses its folder's color. */}
                 <View
                   accessibilityLabel={`${WEEKDAY_LABELS[day.weekdayIndex]}曜日 ${Math.floor(day.seconds / 60)}分`}
                   style={{
                     width: BAR_WIDTH,
                     height,
                     borderRadius: radius.sm,
-                    backgroundColor: isToday ? colors.primary : colors.primaryMuted,
+                    overflow: 'hidden',
+                    flexDirection: 'column-reverse',
                   }}
-                />
+                >
+                  {day.segments.map((segment) => (
+                    <View
+                      key={segment.folderId ?? 'none'}
+                      style={{
+                        height: day.seconds > 0 ? (segment.seconds / day.seconds) * height : 0,
+                        backgroundColor: colorFor(segment.folderId),
+                      }}
+                    />
+                  ))}
+                </View>
               </View>
               <Text
                 style={{
@@ -101,7 +132,7 @@ function WeekChart({ days, maxHours, today }: { days: DayRecord[]; maxHours: num
               >
                 {WEEKDAY_LABELS[day.weekdayIndex]}
               </Text>
-            </View>
+            </Pressable>
           );
         })}
       </View>
@@ -207,6 +238,15 @@ export function RecordsScreen() {
   const folders = view?.folders ?? [];
   const understanding = view?.understanding;
   const needsReview = view?.needsReview ?? null;
+  const colorFor = useFolderColors(folders);
+  // Only folders that appear in this week's bars, in the order of the folder list.
+  const usedFolderIds = new Set(record?.days.flatMap((d) => d.segments.map((s) => s.folderId)));
+  const legend = [
+    ...folders
+      .filter((f) => usedFolderIds.has(f.id))
+      .map((f) => ({ folderId: f.id as string | null, name: f.name })),
+    ...(usedFolderIds.has(null) ? [{ folderId: null, name: '未分類' }] : []),
+  ];
   const selectedFolderName = folders.find((f) => f.id === folderId)?.name ?? 'すべて';
 
   const numeric = {
@@ -251,6 +291,27 @@ export function RecordsScreen() {
         >
           学習記録
         </Text>
+        {/* Figma 02 › IconButton/記録を追加: 44pt primary-soft circle with a 22pt plus → 記録を追加 (02c). */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="記録を追加"
+          onPress={() =>
+            router.push({
+              pathname: '/records/add',
+              params: { day: String(today), folderId: folderId ?? '' },
+            })
+          }
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: colors.primarySoft,
+          }}
+        >
+          <Icon name="plus" size={22} color={colors.primary} strokeWidth={2.4} />
+        </Pressable>
       </View>
 
       <ScrollView
@@ -344,7 +405,30 @@ export function RecordsScreen() {
             today={today}
             days={record?.days ?? []}
             maxHours={record ? chartMaxHours(record.days) : 2}
+            colorFor={colorFor}
           />
+
+          {legend.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+              {legend.map(({ folderId, name }) => (
+                <View key={folderId ?? 'none'} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View
+                    style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colorFor(folderId) }}
+                  />
+                  <Text
+                    style={{
+                      fontFamily: fontFamily.bold,
+                      fontSize: typography.caption.fontSize,
+                      lineHeight: typography.caption.lineHeight,
+                      color: colors.textSecondary,
+                    }}
+                  >
+                    {name}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
 
           {record && record.totalSeconds === 0 && (
             <Text

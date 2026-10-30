@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
 import { useRepositories } from '@/db/database-provider';
+import { parseTimerAlerts } from '@/domain/app-settings';
 
 import {
   advance,
@@ -18,6 +19,7 @@ import {
   type TimerState,
 } from './timer-logic';
 import {
+  configureTimerAlerts,
   ensureNotificationPermission,
   notifyHaptic,
   syncTimerNotifications,
@@ -121,6 +123,16 @@ export function useTimer() {
     [storage],
   );
 
+  /** Creates a folder from the timer and selects it for the next run. Throws ValidationError on a bad name. */
+  const createFolder = useCallback(
+    (name: string) => {
+      const folder = repos.folders.create({ name });
+      setFolders(storage.listFolders());
+      selectFolder(folder.id);
+    },
+    [repos, selectFolder, storage],
+  );
+
   const onPause = useCallback(() => {
     const at = Date.now();
     commit(pause(stateRef.current, at), at);
@@ -149,6 +161,15 @@ export function useTimer() {
     [applySettings, storage],
   );
 
+  // 通知音 / バイブレーション are edited on マイページ › 通知. Re-apply on focus, and re-schedule so the
+  // notifications already queued for a running timer carry the new sound choice.
+  useFocusEffect(
+    useCallback(() => {
+      configureTimerAlerts(parseTimerAlerts((key) => repos.settings.get(key)));
+      void syncTimerNotifications(stateRef.current, Date.now());
+    }, [repos]),
+  );
+
   // The settings sheet on マイページ writes the same storage; pick its changes up when this tab regains focus.
   useFocusEffect(
     useCallback(() => {
@@ -164,6 +185,7 @@ export function useTimer() {
     folders,
     selectedFolderId,
     selectFolder,
+    createFolder,
     remainingMs: getRemainingMs(state, now),
     progress: getProgress(state, now),
     onStart,

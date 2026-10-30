@@ -22,7 +22,11 @@ export type DayRecord = {
   /** 0 = Monday ... 6 = Sunday. */
   weekdayIndex: number;
   seconds: number;
+  /** Per-folder split of `seconds` (stacked bar). `folderId` null = 未分類. Sums to `seconds`. */
+  segments: DaySegment[];
 };
+
+export type DaySegment = { folderId: string | null; seconds: number };
 
 export type WeeklyRecord = {
   /** Epoch ms of local Monday 00:00. */
@@ -84,10 +88,41 @@ export function summarizeDay(sessions: SessionLike[], dayStart: number, folderId
   };
 }
 
+/**
+ * Splits the day's focus time by folder for the stacked chart bar. Segments follow `folderOrder`
+ * (the folder list order) so a folder keeps its position every day; 未分類 and folders that are
+ * no longer in the list come last.
+ */
+export function summarizeDayByFolder(
+  sessions: SessionLike[],
+  dayStart: number,
+  folderOrder: string[] = [],
+): DaySegment[] {
+  const inDay = inRange(sessions, dayStart, addDays(dayStart, 1));
+  const totals = new Map<string | null, number>();
+  for (const s of inDay) totals.set(s.folderId, (totals.get(s.folderId) ?? 0) + s.durationSeconds);
+  const rank = (id: string | null) => {
+    const index = id === null ? -1 : folderOrder.indexOf(id);
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  return [...totals.entries()]
+    .filter(([, seconds]) => seconds > 0)
+    .map(([folderId, seconds]) => ({ folderId, seconds }))
+    .sort(
+      (a, b) => rank(a.folderId) - rank(b.folderId) || String(a.folderId).localeCompare(String(b.folderId)),
+    );
+}
+
+/** Index of a folder in the list, used to pick its color; -1 for 未分類 / unknown (→ the success tone). */
+export function folderColorIndex(folderOrder: string[], folderId: string | null): number {
+  return folderId === null ? -1 : folderOrder.indexOf(folderId);
+}
+
 export function buildWeeklyRecord(
   sessions: SessionLike[],
   weekStart: number,
   folderId?: string,
+  folderOrder: string[] = [],
 ): WeeklyRecord {
   const weekEnd = addWeeks(weekStart, 1);
   const previousStart = addWeeks(weekStart, -1);
@@ -99,8 +134,12 @@ export function buildWeeklyRecord(
     dayStart: addDays(weekStart, i),
     weekdayIndex: i,
     seconds: 0,
+    segments: [],
   }));
-  for (const day of days) day.seconds = summarizeDay(current, day.dayStart).seconds;
+  for (const day of days) {
+    day.seconds = summarizeDay(current, day.dayStart).seconds;
+    day.segments = summarizeDayByFolder(current, day.dayStart, folderOrder);
+  }
 
   const totalSeconds = days.reduce((sum, d) => sum + d.seconds, 0);
   const previousTotalSeconds = previous.reduce((sum, s) => sum + s.durationSeconds, 0);

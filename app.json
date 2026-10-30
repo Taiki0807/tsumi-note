@@ -3,11 +3,10 @@
     "name": "つみノート",
     "slug": "tsumi-note",
     "scheme": "tsumi-note",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "default",
     "icon": "./assets/AppIcon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "usesAppleSignIn": true,
@@ -16,7 +15,7 @@
         "CFBundleDevelopmentRegion": "ja",
         "CFBundleLocalizations": ["ja"]
       },
-      "buildNumber": "3"
+      "buildNumber": "5"
     },
     "web": {
       "bundler": "metro",
@@ -46,7 +45,8 @@
       ],
       "expo-apple-authentication",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true
