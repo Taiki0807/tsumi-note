@@ -1,4 +1,5 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
+import { withXcodeProject, type XcodeProject } from 'expo/config-plugins';
 
 type UrlType = { CFBundleURLSchemes?: string[]; [key: string]: unknown };
 
@@ -33,10 +34,43 @@ export function mergeUrlTypes(
   return missing.length > 0 ? [...base, { CFBundleURLSchemes: missing }] : base;
 }
 
+const DEVELOPMENT_REGION = 'ja';
+
+type PbxObject = Record<string, unknown>;
+
+/**
+ * Expo のテンプレートは Xcode プロジェクトの開発言語が en で、General の Display Name も空になる。
+ * Xcode で手直ししても `expo prebuild --clean` で消えるため、prebuild 時に毎回設定する。
+ * - PBXProject の developmentRegion を ja にし、knownRegions から en を外す(App Store の言語表示が英語になるのを防ぐ)
+ * - アプリ target の INFOPLIST_KEY_CFBundleDisplayName に表示名を入れる(General の Display Name 欄)
+ */
+export function applyJapaneseProject(project: XcodeProject, displayName: string): XcodeProject {
+  const objects = project.hash.project.objects as Record<string, Record<string, unknown>>;
+
+  for (const p of Object.values(objects.PBXProject ?? {})) {
+    if (typeof p !== 'object' || p === null) continue;
+    const pbx = p as PbxObject;
+    const known = Array.isArray(pbx.knownRegions) ? (pbx.knownRegions as string[]) : [];
+    const rest = known.filter((r) => !['en', 'English', DEVELOPMENT_REGION, 'Base'].includes(r));
+    pbx.developmentRegion = DEVELOPMENT_REGION;
+    pbx.knownRegions = [DEVELOPMENT_REGION, 'Base', ...rest];
+  }
+
+  for (const c of Object.values(objects.XCBuildConfiguration ?? {})) {
+    if (typeof c !== 'object' || c === null) continue;
+    const settings = (c as PbxObject).buildSettings as PbxObject | undefined;
+    // アプリ target の設定だけ(PROJECT 全体の設定には PRODUCT_NAME がない)
+    if (!settings?.PRODUCT_NAME) continue;
+    settings.INFOPLIST_KEY_CFBundleDisplayName = JSON.stringify(displayName);
+  }
+  return project;
+}
+
 /**
  * app.json に環境変数由来の値を足す。
  * Google ログインの iOS クライアントID(EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID)が設定されている場合のみ、
  * リダイレクト用の逆順ドメイン URL scheme を Info.plist に登録する(tsumi-note scheme は維持する)。
+ * あわせて Xcode プロジェクトの開発言語と表示名を設定する(applyJapaneseProject)。
  */
 export default ({ config }: ConfigContext): ExpoConfig => {
   const urlTypes = mergeUrlTypes(
@@ -45,13 +79,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     googleReverseScheme(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID),
   );
 
-  return {
+  const expoConfig: ExpoConfig = {
     ...(config as ExpoConfig),
 
-    plugins: [
-      ...(config.plugins ?? []),
-      'expo-image',
-    ],
+    plugins: [...(config.plugins ?? []), 'expo-image'],
 
     ios: {
       ...config.ios,
@@ -61,4 +92,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
     },
   };
+
+  return withXcodeProject(expoConfig, (c) => {
+    c.modResults = applyJapaneseProject(c.modResults, c.name);
+    return c;
+  });
 };
