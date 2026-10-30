@@ -3,6 +3,8 @@
  * Repositories always run these, so invalid data can never reach SQLite regardless of the UI.
  */
 
+import { toNFC } from './text';
+
 export type ValidationField = 'folderName' | 'prompt' | 'answer';
 
 export class ValidationError extends Error {
@@ -22,7 +24,7 @@ const FIELD_MESSAGES: Record<ValidationField, string> = {
 };
 
 function requireText(field: ValidationField, raw: string): string {
-  const value = raw.trim();
+  const value = toNFC(raw).trim();
   if (value === '') throw new ValidationError(field, FIELD_MESSAGES[field]);
   return value;
 }

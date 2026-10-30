@@ -18,6 +18,7 @@ import { Button, ConfirmDeleteSheet, EmptyState, IconButton } from '@/components
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, typography, useTheme } from '@/design';
 import { removeSegmentLine, splitEditorSegments, toggleChecklistLine } from '@/domain/markdown';
+import { toNFC } from '@/domain/text';
 import {
   applyBlock,
   currentHeadingLevel,
@@ -315,7 +316,7 @@ export function NoteEditorScreen() {
           <TextInput
             accessibilityLabel="タイトル"
             value={title}
-            onChangeText={updateTitle}
+            onChangeText={(value) => updateTitle(toNFC(value))}
             placeholder="タイトル"
             placeholderTextColor={colors.textPlaceholder}
             returnKeyType="next"
@@ -401,7 +402,7 @@ export function NoteEditorScreen() {
                   accessibilityLabel="Markdown本文"
                   value={segment.text}
                   onChangeText={(value) =>
-                    updateBody(body.slice(0, segment.start) + value + body.slice(segment.end))
+                    updateBody(body.slice(0, segment.start) + toNFC(value) + body.slice(segment.end))
                   }
                   selection={sel?.seg === i ? sel.range : undefined}
                   onSelectionChange={(e) => {

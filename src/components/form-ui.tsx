@@ -14,6 +14,7 @@ import {
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { toNFC } from '@/domain/text';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 
 import { Icon, type IconName } from './icons';
@@ -144,7 +145,7 @@ export function SearchField({
         ref={inputRef}
         accessibilityLabel={placeholder}
         value={value}
-        onChangeText={onChangeText}
+        onChangeText={(text) => onChangeText(toNFC(text))}
         placeholder={placeholder}
         placeholderTextColor={colors.textSecondary}
         returnKeyType="search"
@@ -203,6 +204,7 @@ export function TextField({
           color: colors.textPrimary,
         }}
         {...inputProps}
+        onChangeText={inputProps.onChangeText && ((text) => inputProps.onChangeText?.(toNFC(text)))}
       />
     </View>
   );

@@ -1,5 +1,6 @@
 import { and, count, desc, eq, isNull, or } from 'drizzle-orm';
 
+import { toNFC } from '../../domain/text';
 import { folders, notes } from '../schema';
 import type { RepositoryDeps } from '../types';
 import { containsPattern, likeContains } from './search';
@@ -15,7 +16,9 @@ export type NoteInput = {
 
 /** Titles are single-line; surrounding whitespace is dropped. The Markdown body is left untouched. */
 function normalizeTitle(raw: string): string {
-  return raw.replace(/[\r\n]+/g, ' ').trim();
+  return toNFC(raw)
+    .replace(/[\r\n]+/g, ' ')
+    .trim();
 }
 
 /**
@@ -45,7 +48,7 @@ export function createNoteRepository({ db, now, newId }: RepositoryDeps) {
         id: newId(),
         folderId,
         title: normalizeTitle(input.title ?? ''),
-        body: input.body ?? '',
+        body: toNFC(input.body ?? ''),
         pinned: false,
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -107,7 +110,7 @@ export function createNoteRepository({ db, now, newId }: RepositoryDeps) {
       db.update(notes)
         .set({
           title: normalizeTitle(input.title),
-          body: input.body,
+          body: toNFC(input.body),
           folderId: input.folderId,
           updatedAt: now(),
         })
