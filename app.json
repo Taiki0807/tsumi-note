@@ -44,7 +44,7 @@
         }
       ],
       "expo-apple-authentication",
-      "expo-secure-store",
+      ["expo-secure-store", { "faceIDPermission": false }],
       "expo-web-browser",
       "expo-status-bar"
     ],
