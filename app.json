@@ -3,7 +3,7 @@
     "name": "つみノート",
     "slug": "tsumi-note",
     "scheme": "tsumi-note",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "default",
     "icon": "./assets/AppIcon.png",
     "userInterfaceStyle": "automatic",
@@ -15,7 +15,7 @@
         "CFBundleDevelopmentRegion": "ja",
         "CFBundleLocalizations": ["ja"]
       },
-      "buildNumber": "3"
+      "buildNumber": "5"
     },
     "web": {
       "bundler": "metro",
