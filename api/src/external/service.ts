@@ -229,7 +229,14 @@ export type ExternalSessionInput = {
   endedAt: number;
   durationSeconds: number;
   folderId: string | null;
+  /** 正規化済み(trim + NFC)のフォルダー名。folderId とは同時に指定できない */
+  folderName: string | null;
 };
+
+export const MAX_FOLDER_NAME = 50;
+export const MIN_SESSION_SECONDS = 60;
+
+export const normalizeFolderName = (name: string) => name.trim().normalize('NFC');
 
 function parseTime(raw: unknown, field: string): number {
   // タイムゾーン付きのISO 8601(例: 2026-10-28T09:00:00+09:00 / ...Z)のみ受け付ける。ずれた解釈を避けるため
@@ -254,7 +261,7 @@ export function parseExternalSession(body: unknown, now: number): ExternalSessio
     throw new ExternalError('invalid_request', 400, '本文はJSONオブジェクトで指定してください');
   }
   const b = body as Record<string, unknown>;
-  const allowed = new Set(['externalId', 'startedAt', 'endedAt', 'durationSeconds', 'folderId']);
+  const allowed = new Set(['externalId', 'startedAt', 'endedAt', 'durationSeconds', 'folderId', 'folderName']);
   for (const key of Object.keys(b)) {
     if (!allowed.has(key)) throw new ExternalError('invalid_request', 400, `未知のキー: ${key}`);
   }
@@ -286,6 +293,9 @@ export function parseExternalSession(body: unknown, now: number): ExternalSessio
     }
     durationSeconds = d;
   }
+  if (durationSeconds < MIN_SESSION_SECONDS) {
+    throw new ExternalError('invalid_request', 400, '1分未満の記録は登録できません');
+  }
   let folderId: string | null = null;
   if (b.folderId !== undefined && b.folderId !== null) {
     if (typeof b.folderId !== 'string' || !/^[A-Za-z0-9._~:-]{1,128}$/.test(b.folderId)) {
@@ -293,7 +303,20 @@ export function parseExternalSession(body: unknown, now: number): ExternalSessio
     }
     folderId = b.folderId;
   }
-  return { externalId: b.externalId, startedAt, endedAt, durationSeconds, folderId };
+  let folderName: string | null = null;
+  if (b.folderName !== undefined && b.folderName !== null) {
+    if (folderId !== null) {
+      throw new ExternalError('invalid_request', 400, 'folderId と folderName は同時に指定できません');
+    }
+    if (typeof b.folderName !== 'string') {
+      throw new ExternalError('invalid_request', 400, 'folderName が不正です');
+    }
+    folderName = normalizeFolderName(b.folderName);
+    if (folderName.length < 1 || folderName.length > MAX_FOLDER_NAME) {
+      throw new ExternalError('invalid_request', 400, `folderName は1〜${MAX_FOLDER_NAME}文字で指定してください`);
+    }
+  }
+  return { externalId: b.externalId, startedAt, endedAt, durationSeconds, folderId, folderName };
 }
 
 /**
@@ -305,7 +328,28 @@ export async function recordExternalSession(
   userId: string,
   input: ExternalSessionInput,
   now: number,
-): Promise<{ id: string; duplicate: boolean }> {
+): Promise<{ id: string; duplicate: boolean; folderId: string | null; folderCreated: boolean }> {
+  // 重複チェックはフォルダーの検索・作成より先に行う(再送でフォルダーを作らない)
+  const digest = (await sha256Hex(`${userId}\u0000${input.externalId}`)).slice(0, 40);
+  const id = `ext-${digest}`;
+  const existing = await driver.all<{ id: string; data: string }>({
+    sql: "SELECT id, data FROM sync_records WHERE user_id = ? AND entity = 'study_sessions' AND id = ?",
+    params: [userId, id],
+  });
+  if (existing.length > 0) {
+    let prevFolder: string | null = null;
+    try {
+      const f = (JSON.parse(existing[0]!.data) as Record<string, unknown>).folder_id;
+      if (typeof f === 'string') prevFolder = f;
+    } catch {
+      // 壊れたデータは未分類として扱う
+    }
+    return { id, duplicate: true, folderId: prevFolder, folderCreated: false };
+  }
+
+  const changes: Change[] = [];
+  let folderId = input.folderId;
+  let folderCreated = false;
   if (input.folderId !== null) {
     const folders = await driver.all<{ id: string }>({
       sql: `SELECT id FROM sync_records
@@ -313,30 +357,76 @@ export async function recordExternalSession(
       params: [userId, input.folderId],
     });
     if (folders.length === 0) throw new ExternalError('folder_not_found', 422, 'フォルダーが見つかりません');
+  } else if (input.folderName !== null) {
+    const name = input.folderName;
+    const rows = await driver.all<{ id: string; data: string }>({
+      sql: `SELECT id, data FROM sync_records
+            WHERE user_id = ? AND entity = 'folders' AND deleted_at IS NULL`,
+      params: [userId],
+    });
+    const matches = rows.flatMap((r) => {
+      try {
+        const d = JSON.parse(r.data) as Record<string, unknown>;
+        if (typeof d.name !== 'string' || normalizeFolderName(d.name) !== name) return [];
+        return [{ id: r.id, createdAt: typeof d.created_at === 'number' ? d.created_at : 0 }];
+      } catch {
+        return [];
+      }
+    });
+    matches.sort((x, y) => x.createdAt - y.createdAt || x.id.localeCompare(y.id));
+    if (matches[0]) {
+      folderId = matches[0].id;
+    } else {
+      // 決定的なIDにして、同時リクエストでも同名フォルダーが二重に作られないようにする
+      const deterministic = `extf-${(await sha256Hex(`${userId}\u0000${name}`)).slice(0, 40)}`;
+      const taken = await driver.all<{ id: string; data: string; deleted_at: number | null }>({
+        sql: "SELECT id, data, deleted_at FROM sync_records WHERE user_id = ? AND entity = 'folders' AND id = ?",
+        params: [userId, deterministic],
+      });
+      let reusable = false;
+      if (taken[0] && taken[0].deleted_at === null) {
+        try {
+          const n = (JSON.parse(taken[0].data) as Record<string, unknown>).name;
+          reusable = typeof n === 'string' && normalizeFolderName(n) === name;
+        } catch {
+          // 壊れたデータは再利用しない
+        }
+      }
+      if (reusable) {
+        // 検索の後に並行リクエストが同名フォルダーを作成済み: それを使う
+        folderId = deterministic;
+      } else {
+        // 同じIDが改名済み・削除済みで残っている場合はランダムなIDにする
+        folderId = taken.length === 0 ? deterministic : crypto.randomUUID();
+        folderCreated = true;
+        changes.push({
+          spec: ENTITY_BY_NAME.get('folders')!,
+          id: folderId,
+          opId: `extf-op-${digest}`,
+          baseSeq: null,
+          data: { name, created_at: now, updated_at: now, deleted_at: null },
+        });
+      }
+    }
   }
-  const digest = (await sha256Hex(`${userId}\u0000${input.externalId}`)).slice(0, 40);
-  const id = `ext-${digest}`;
-  const existing = await driver.all<{ id: string }>({
-    sql: "SELECT id FROM sync_records WHERE user_id = ? AND entity = 'study_sessions' AND id = ?",
-    params: [userId, id],
-  });
-  if (existing.length > 0) return { id, duplicate: true };
-  const change: Change = {
+  changes.push({
     spec: ENTITY_BY_NAME.get('study_sessions')!,
     id,
     opId: `ext-op-${digest}`,
     baseSeq: null,
     data: {
-      folder_id: input.folderId,
+      folder_id: folderId,
       started_at: input.startedAt,
       ended_at: input.endedAt,
       duration_seconds: input.durationSeconds,
       created_at: now,
     },
-  };
-  const [result] = await pushChanges(driver, userId, [change]);
-  if (!result || result.status === 'retry') throw new Error('retry');
-  return { id, duplicate: false };
+  });
+  const results = await pushChanges(driver, userId, changes);
+  if (results.length !== changes.length || results.some((r) => !r || r.status === 'retry')) {
+    throw new Error('retry');
+  }
+  return { id, duplicate: false, folderId, folderCreated };
 }
 
 // ---- 読み取り(study_sessions:read)。対象は常にトークンの持ち主の学習記録だけ ----
