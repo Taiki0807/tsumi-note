@@ -289,8 +289,13 @@ export function createApp(
     if (text.length > MAX_EXTERNAL_BODY_CHARS) return c.json({ error: 'payload_too_large' }, 413);
     try {
       const input = parseExternalSession(JSON.parse(text), now);
-      const { id, duplicate } = await recordExternalSession(driver, auth.userId, input, now);
-      return c.json({ id, duplicate }, duplicate ? 200 : 201);
+      const { id, duplicate, folderId, folderCreated } = await recordExternalSession(
+        driver,
+        auth.userId,
+        input,
+        now,
+      );
+      return c.json({ id, duplicate, folderId, folderCreated }, duplicate ? 200 : 201);
     } catch (e) {
       if (e instanceof SyntaxError)
         return c.json({ error: 'invalid_request', message: 'JSONが不正です' }, 400);

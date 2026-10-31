@@ -43,7 +43,7 @@ export function createHarness(
   });
   const objects = new Map<string, Uint8Array>();
   /** R2 の障害を再現する(アカウント削除の途中失敗のテスト用) */
-  const faults: Faults = { deletePrefix: false, beforePut: null, readDeletion: false, failBatchOn: null };
+  const faults: Faults = { deletePrefix: false, beforePut: null, readDeletion: false, failBatchOn: null, beforeBatch: null };
   const app = createApp(
     () => auth,
     () => faultyDriver(bunDriver(sqlite), faults),
@@ -99,6 +99,8 @@ type Faults = {
   readDeletion: boolean;
   /** 設定した文字列を含むSQLを実行する batch を失敗させる */
   failBatchOn: string | null;
+  /** batch の直前に呼ばれる。並行リクエストが先に書き込んだ状況(0行更新=retry)を再現するためのフック */
+  beforeBatch: ((statements: SqlStatement[], inner: SyncDriver) => Promise<void>) | null;
 };
 
 function faultyDriver(inner: SyncDriver, faults: Faults): SyncDriver {
@@ -110,6 +112,7 @@ function faultyDriver(inner: SyncDriver, faults: Faults): SyncDriver {
       return inner.all<T>(s);
     },
     async batch(statements: SqlStatement[]): Promise<number[]> {
+      if (faults.beforeBatch) await faults.beforeBatch(statements, inner);
       const target = faults.failBatchOn;
       if (target && statements.some((s) => s.sql.includes(target))) throw new Error('D1 unavailable');
       return inner.batch(statements);

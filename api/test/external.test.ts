@@ -161,6 +161,208 @@ describe('POST /external/v1/study-sessions', () => {
     expect(rec!.data.folder_id).toBe('folder-a');
   });
 
+  describe('folderName', () => {
+    const pushFolder = (h: H, cookie: string, id: string, name: string, over: Record<string, unknown> = {}) =>
+      h.request('/v1/sync/push', {
+        headers: { cookie },
+        body: {
+          changes: [
+            {
+              entity: 'folders',
+              id,
+              opId: `op-${id}`,
+              baseSeq: null,
+              data: { name, created_at: 1, updated_at: 1, deleted_at: null, ...over },
+            },
+          ],
+        },
+      });
+    const folders = async (h: H, cookie: string) =>
+      (await pull(h, cookie)).filter((c) => c.entity === 'folders' && c.data.deleted_at === null);
+    const tokenOf = async (h: H, cookie: string) => (await createToken(h, cookie)).body.token as string;
+
+    test('同名フォルダーがあればそこへ記録する(前後の空白・濁点の分解形も一致)', async () => {
+      const { h, a } = await setup();
+      await pushFolder(h, a, 'f1', 'ダンス'); // NFC
+      const t = await tokenOf(h, a);
+      const decomposed = `  ${'ダンス'.normalize('NFD')}  `;
+      const res = await post(h, t, session({ folderName: decomposed }));
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ folderId: 'f1', folderCreated: false });
+      expect(await folders(h, a)).toHaveLength(1);
+    });
+
+    test('同名が複数なら created_at が最も古いもの。大文字小文字は区別する', async () => {
+      const { h, a } = await setup();
+      await pushFolder(h, a, 'new', 'Math', { created_at: 20 });
+      await pushFolder(h, a, 'old', 'Math', { created_at: 10 });
+      await pushFolder(h, a, 'lower', 'math', { created_at: 1 });
+      const t = await tokenOf(h, a);
+      expect((await post(h, t, session({ folderName: 'Math' }))).body.folderId).toBe('old');
+    });
+
+    test('なければ作成され、同期で フォルダー と 記録 の両方が取得できる', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      const res = await post(h, t, session({ folderName: '韓国語' }));
+      expect(res.status).toBe(201);
+      expect(res.body.folderCreated).toBe(true);
+      expect(res.body.folderId).toMatch(/^extf-[0-9a-f]{40}$/);
+      const changes = await pull(h, a);
+      expect(changes.find((c) => c.entity === 'folders')!.data.name).toBe('韓国語');
+      expect(changes.find((c) => c.entity === 'study_sessions')!.data.folder_id).toBe(res.body.folderId);
+    });
+
+    test('同じ新しい名前を並行・連続で登録してもフォルダーは1つ', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      const rs = await Promise.all([
+        post(h, t, session({ externalId: 'p1', folderName: '新規' })),
+        post(h, t, session({ externalId: 'p2', folderName: '新規' })),
+      ]);
+      expect(rs.every((r) => r.status === 201)).toBe(true);
+      const r3 = await post(h, t, session({ externalId: 'p3', folderName: '新規' }));
+      expect(r3.body.folderCreated).toBe(false);
+      expect(await folders(h, a)).toHaveLength(1);
+    });
+
+    test('異なる externalId・同じ新規名の並行登録は両方 201、フォルダー1つ、作成扱いは片方だけ', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      const rs = await Promise.all([
+        post(h, t, session({ externalId: 'q1', folderName: '並行' })),
+        post(h, t, session({ externalId: 'q2', folderName: '並行' })),
+      ]);
+      expect(rs.map((r) => r.status)).toEqual([201, 201]);
+      expect(rs.filter((r) => r.body.folderCreated).length).toBe(1);
+      const fs = await folders(h, a);
+      expect(fs).toHaveLength(1);
+      const sessions = (await pull(h, a)).filter((c) => c.entity === 'study_sessions');
+      expect(sessions).toHaveLength(2);
+      for (const s of sessions) expect(s.data.folder_id).toBe(fs[0]!.id);
+    });
+
+    test('フォルダー書き込みが retry になっても 500 にならず、並行作成済みのフォルダーを使う', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      let injected = false;
+      h.faults.beforeBatch = async (statements, inner) => {
+        if (injected || !statements.some((s) => s.params.some((p) => typeof p === 'string' && p.startsWith('extf-')))) {
+          return;
+        }
+        injected = true;
+        await inner.batch(statements); // 並行リクエストが先に同じフォルダーを作成した状況
+      };
+      const res = await post(h, t, session({ folderName: '競合' }));
+      expect(injected).toBe(true);
+      expect(res.status).toBe(201);
+      expect(res.body.folderCreated).toBe(false);
+      const fs = await folders(h, a);
+      expect(fs).toHaveLength(1);
+      expect(res.body.folderId).toBe(fs[0]!.id);
+      const rec = (await pull(h, a)).find((c) => c.entity === 'study_sessions');
+      expect(rec!.data.folder_id).toBe(fs[0]!.id);
+    });
+
+    test('決定的IDのフォルダーが削除済みならランダムIDで作成される', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      const first = await post(h, t, session({ externalId: 'd1', folderName: '削除' }));
+      h.sqlite.run('UPDATE sync_records SET deleted_at = 5 WHERE id = ?', [first.body.folderId]);
+      const second = await post(h, t, session({ externalId: 'd2', folderName: '削除' }));
+      expect(second.status).toBe(201);
+      expect(second.body.folderCreated).toBe(true);
+      expect(second.body.folderId).not.toBe(first.body.folderId);
+      expect(second.body.folderId).not.toMatch(/^extf-/);
+    });
+
+    test('学習記録の書き込みが retry でも、既に保存されていれば duplicate: true で成功する', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      let injected = false;
+      h.faults.beforeBatch = async (statements, inner) => {
+        if (injected || !statements.some((s) => s.params.some((p) => typeof p === 'string' && p.startsWith('ext-')))) {
+          return;
+        }
+        injected = true;
+        await inner.batch(statements); // 同じ記録が並行リクエストで先に保存された状況
+      };
+      const res = await post(h, t, session({ externalId: 's1', folderName: '記録競合' }));
+      expect(injected).toBe(true);
+      expect(res.status).toBe(200);
+      expect(res.body.duplicate).toBe(true);
+      expect((await pull(h, a)).filter((c) => c.entity === 'study_sessions')).toHaveLength(1);
+    });
+
+    test('削除済み・他ユーザーの同名フォルダーは使わない', async () => {
+      const { h, a, b } = await setup();
+      await pushFolder(h, a, 'gone', '英語', { deleted_at: 5 });
+      await pushFolder(h, b, 'theirs', '英語');
+      const t = await tokenOf(h, a);
+      const res = await post(h, t, session({ folderName: '英語' }));
+      expect(res.body.folderCreated).toBe(true);
+      expect(res.body.folderId).not.toBe('gone');
+      expect(res.body.folderId).not.toBe('theirs');
+    });
+
+    test('自動作成後に改名されたら、旧名では新しいフォルダーが作られる', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      const first = await post(h, t, session({ externalId: 'r1', folderName: '旧名' }));
+      const cur = (await pull(h, a)).find((c) => c.entity === 'folders')! as any;
+      const seq = ((await (await h.request('/v1/sync/pull?cursor=0', { headers: { cookie: a } })).json()) as any)
+        .changes.find((c: any) => c.entity === 'folders').serverSeq;
+      await h.request('/v1/sync/push', {
+        headers: { cookie: a },
+        body: {
+          changes: [
+            {
+              entity: 'folders',
+              id: first.body.folderId,
+              opId: 'rename',
+              baseSeq: seq,
+              data: { ...cur.data, name: '新名', updated_at: cur.data.updated_at + 1 },
+            },
+          ],
+        },
+      });
+      const second = await post(h, t, session({ externalId: 'r2', folderName: '旧名' }));
+      expect(second.body.folderCreated).toBe(true);
+      expect(second.body.folderId).not.toBe(first.body.folderId);
+    });
+
+    test('不正な指定は 400', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      const bad = async (over: Record<string, unknown>) => (await post(h, t, session(over))).status;
+      expect(await bad({ folderId: 'x', folderName: 'y' })).toBe(400);
+      expect(await bad({ folderName: 'a'.repeat(51) })).toBe(400);
+      expect(await bad({ folderName: '' })).toBe(400);
+      expect(await bad({ folderName: '   ' })).toBe(400);
+      expect(await bad({ folderName: 5 })).toBe(400);
+      expect(await bad({ folderName: 'a'.repeat(50) })).toBe(201);
+    });
+
+    test('同じ externalId の再送は duplicate: true でフォルダーを作らない', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      expect((await post(h, t, session({ folderName: '一回' }))).status).toBe(201);
+      const again = await post(h, t, session({ folderName: '別の名前' }));
+      expect(again.status).toBe(200);
+      expect(again.body.duplicate).toBe(true);
+      expect(await folders(h, a)).toHaveLength(1);
+    });
+  });
+
+  test('1分未満の記録は 400', async () => {
+    const { h, a } = await setup();
+    const t = (await createToken(h, a)).body.token as string;
+    const end = Date.now() - 60_000;
+    expect((await post(h, t, session({ startedAt: iso(end - 30_000), endedAt: iso(end) }))).status).toBe(400);
+    expect((await post(h, t, session({ durationSeconds: 59 }))).status).toBe(400);
+    expect((await post(h, t, session({ durationSeconds: 60 }))).status).toBe(201);
+  });
+
   test('別ユーザーの同じ externalId は衝突しない', async () => {
     const { h, a, b } = await setup();
     const ta = (await createToken(h, a)).body.token as string;
