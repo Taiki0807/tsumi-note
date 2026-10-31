@@ -16,7 +16,7 @@
         "CFBundleLocalizations": ["ja"],
         "LSApplicationCategoryType": "public.app-category.education"
       },
-      "buildNumber": "5"
+      "buildNumber": "6"
     },
     "web": {
       "bundler": "metro",

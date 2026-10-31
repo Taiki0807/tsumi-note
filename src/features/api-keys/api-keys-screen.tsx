@@ -5,6 +5,7 @@ import { Pressable, Text, View } from 'react-native';
 import { BottomSheet, Button, ConfirmDeleteSheet, IconButton, TextField } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, typography, useTheme } from '@/design';
+import { API_DOCS_URL, openLegalUrl } from '@/features/settings/legal-links';
 import { SettingsScaffold } from '@/features/settings/settings-ui';
 
 import {
@@ -28,6 +29,7 @@ const CODE_LINES = [
   { text: 'Authorization: Bearer tsn_…', color: '#bfbfd9' },
   { text: '{', color: '#ffffff' },
   { text: '  "externalId": "drill-001",', color: '#ffffff' },
+  { text: '  "folderName": "英語",', color: '#ffffff' },
   { text: '  "startedAt": "2026-09-13T21:10:00+09:00",', color: '#ffffff' },
   { text: '  "endedAt": "2026-09-13T21:30:00+09:00"', color: '#ffffff' },
   { text: '}', color: '#ffffff' },
@@ -547,6 +549,18 @@ export function ApiKeysScreen() {
           </Text>
         ))}
       </View>
+      {/* Figma 16c: 詳細はLPのAPIドキュメントへ誘導する */}
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel="APIドキュメントを見る"
+        onPress={() => openLegalUrl(API_DOCS_URL)}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start' }}
+      >
+        <Text style={{ fontFamily: fontFamily.extraBold, fontSize: 14, lineHeight: 21, color: colors.primary }}>
+          APIドキュメントを見る
+        </Text>
+        <Icon name="chevron-right" size={16} color={colors.primary} strokeWidth={2} />
+      </Pressable>
 
       <IssueSheet
         visible={issuing}
