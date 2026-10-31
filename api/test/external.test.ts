@@ -226,6 +226,74 @@ describe('POST /external/v1/study-sessions', () => {
       expect(await folders(h, a)).toHaveLength(1);
     });
 
+    test('異なる externalId・同じ新規名の並行登録は両方 201、フォルダー1つ、作成扱いは片方だけ', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      const rs = await Promise.all([
+        post(h, t, session({ externalId: 'q1', folderName: '並行' })),
+        post(h, t, session({ externalId: 'q2', folderName: '並行' })),
+      ]);
+      expect(rs.map((r) => r.status)).toEqual([201, 201]);
+      expect(rs.filter((r) => r.body.folderCreated).length).toBe(1);
+      const fs = await folders(h, a);
+      expect(fs).toHaveLength(1);
+      const sessions = (await pull(h, a)).filter((c) => c.entity === 'study_sessions');
+      expect(sessions).toHaveLength(2);
+      for (const s of sessions) expect(s.data.folder_id).toBe(fs[0]!.id);
+    });
+
+    test('フォルダー書き込みが retry になっても 500 にならず、並行作成済みのフォルダーを使う', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      let injected = false;
+      h.faults.beforeBatch = async (statements, inner) => {
+        if (injected || !statements.some((s) => s.params.some((p) => typeof p === 'string' && p.startsWith('extf-')))) {
+          return;
+        }
+        injected = true;
+        await inner.batch(statements); // 並行リクエストが先に同じフォルダーを作成した状況
+      };
+      const res = await post(h, t, session({ folderName: '競合' }));
+      expect(injected).toBe(true);
+      expect(res.status).toBe(201);
+      expect(res.body.folderCreated).toBe(false);
+      const fs = await folders(h, a);
+      expect(fs).toHaveLength(1);
+      expect(res.body.folderId).toBe(fs[0]!.id);
+      const rec = (await pull(h, a)).find((c) => c.entity === 'study_sessions');
+      expect(rec!.data.folder_id).toBe(fs[0]!.id);
+    });
+
+    test('決定的IDのフォルダーが削除済みならランダムIDで作成される', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      const first = await post(h, t, session({ externalId: 'd1', folderName: '削除' }));
+      h.sqlite.run('UPDATE sync_records SET deleted_at = 5 WHERE id = ?', [first.body.folderId]);
+      const second = await post(h, t, session({ externalId: 'd2', folderName: '削除' }));
+      expect(second.status).toBe(201);
+      expect(second.body.folderCreated).toBe(true);
+      expect(second.body.folderId).not.toBe(first.body.folderId);
+      expect(second.body.folderId).not.toMatch(/^extf-/);
+    });
+
+    test('学習記録の書き込みが retry でも、既に保存されていれば duplicate: true で成功する', async () => {
+      const { h, a } = await setup();
+      const t = await tokenOf(h, a);
+      let injected = false;
+      h.faults.beforeBatch = async (statements, inner) => {
+        if (injected || !statements.some((s) => s.params.some((p) => typeof p === 'string' && p.startsWith('ext-')))) {
+          return;
+        }
+        injected = true;
+        await inner.batch(statements); // 同じ記録が並行リクエストで先に保存された状況
+      };
+      const res = await post(h, t, session({ externalId: 's1', folderName: '記録競合' }));
+      expect(injected).toBe(true);
+      expect(res.status).toBe(200);
+      expect(res.body.duplicate).toBe(true);
+      expect((await pull(h, a)).filter((c) => c.entity === 'study_sessions')).toHaveLength(1);
+    });
+
     test('削除済み・他ユーザーの同名フォルダーは使わない', async () => {
       const { h, a, b } = await setup();
       await pushFolder(h, a, 'gone', '英語', { deleted_at: 5 });
