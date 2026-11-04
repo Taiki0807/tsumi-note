@@ -126,7 +126,8 @@ export function NoteEditorScreen() {
   const [saved, setSaved] = useState(true);
   const [editingBody, setEditingBody] = useState(body === '');
   const [pickingFolder, setPickingFolder] = useState(false);
-  const folderTone = useFolderTone(folders.findIndex((f) => f.id === folderId));
+  const folderIndex = folders.findIndex((f) => f.id === folderId);
+  const folderTone = useFolderTone(folderIndex, folders[folderIndex]?.color);
   const [sheet, setSheet] = useState<SheetName | null>(null);
   const [headingLevel, setHeadingLevel] = useState<number | undefined>(undefined);
   const selection = useRef<Selection>({ start: body.length, end: body.length });

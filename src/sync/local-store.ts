@@ -2,7 +2,7 @@ import { sql, type SQL } from 'drizzle-orm';
 
 import type { AppDatabase } from '@/db/types';
 
-import { ENTITIES, ENTITY_BY_NAME, type EntitySpec } from './entities';
+import { ENTITIES, ENTITY_BY_NAME, fillLegacy, type EntitySpec } from './entities';
 import { fsrsWins } from './merge';
 
 /** `db` / transaction のどちらも渡せる最小の型 */
@@ -154,7 +154,9 @@ export function setBaseSeq(db: Executor, entity: string, id: string, seq: number
  * - fsrs: ローカルより新しい復習状態のときだけ置き換える
  * 戻り値は反映したか。
  */
-export function applyRemote(db: Executor, spec: EntitySpec, id: string, data: RecordData): boolean {
+export function applyRemote(db: Executor, spec: EntitySpec, id: string, remote: RecordData): boolean {
+  // 旧形式で保存されたレコード(後から追加した列を持たない)は、列を補ってから反映する
+  const data = fillLegacy(spec, remote).data as RecordData;
   if (spec.kind === 'fsrs') {
     const local = readRecord(db, spec, id);
     if (local && !fsrsWins(data as never, local as never)) return false;

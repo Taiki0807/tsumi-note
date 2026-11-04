@@ -1,5 +1,6 @@
 import { and, asc, count, eq, isNull } from 'drizzle-orm';
 
+import { isFolderColorKey, nextFolderColorKey } from '../../design/folder-palette';
 import { normalizeFolderName } from '../../domain/validation';
 import { folders, notes, questions } from '../schema';
 import type { RepositoryDeps } from '../types';
@@ -16,12 +17,27 @@ export type Folder = typeof folders.$inferSelect;
  */
 export function createFolderRepository({ db, now, newId }: RepositoryDeps) {
   return {
-    create(input: { name: string }): Folder {
+    /**
+     * `color` is a palette key (`src/design/folder-palette.ts`). Without one the next unused palette
+     * color is assigned, so new folders do not all look alike.
+     */
+    create(input: { name: string; color?: string }): Folder {
       const name = normalizeFolderName(input.name);
       const timestamp = now();
+      const color = isFolderColorKey(input.color)
+        ? input.color
+        : nextFolderColorKey(
+            db
+              .select({ color: folders.color })
+              .from(folders)
+              .where(isNull(folders.deletedAt))
+              .all()
+              .map((f) => f.color),
+          );
       const row = {
         id: newId(),
         name,
+        color,
         createdAt: timestamp,
         updatedAt: timestamp,
         deletedAt: null,
@@ -59,10 +75,19 @@ export function createFolderRepository({ db, now, newId }: RepositoryDeps) {
         .all();
     },
 
-    rename(id: string, name: string): void {
+    /** Renames the folder; an optional palette `color` is saved in the same write. */
+    rename(id: string, name: string, color?: string): void {
       const normalized = normalizeFolderName(name);
       db.update(folders)
-        .set({ name: normalized, updatedAt: now() })
+        .set({ name: normalized, ...(isFolderColorKey(color) ? { color } : {}), updatedAt: now() })
+        .where(and(eq(folders.id, id), isNull(folders.deletedAt)))
+        .run();
+    },
+
+    setColor(id: string, color: string): void {
+      if (!isFolderColorKey(color)) return;
+      db.update(folders)
+        .set({ color, updatedAt: now() })
         .where(and(eq(folders.id, id), isNull(folders.deletedAt)))
         .run();
     },

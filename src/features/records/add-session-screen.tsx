@@ -9,9 +9,16 @@ import { FolderPickerSheet } from '@/features/timer/folder-picker-sheet';
 import { SettingsScaffold } from '@/features/settings/settings-ui';
 
 import { useFolderColors } from './folder-colors';
-import { buildManualSession, formatClock, formatFullDate, formatMinutes, recentDays } from './manual-session';
+import {
+  buildEditedSession,
+  buildManualSession,
+  formatClock,
+  formatFullDate,
+  formatMinutes,
+  recentDays,
+} from './manual-session';
 import { startOfLocalDay } from './records-logic';
-import { useAddSession } from './use-day-record';
+import { useAddSession, useEditSession } from './use-day-record';
 
 /** Figma 02c の入力欄: 52pt, 1.5pt border, radius 16, white fill. */
 function FieldBox({
@@ -120,39 +127,51 @@ function ValueText({ children }: { children: string }) {
  */
 export function AddSessionScreen() {
   const colors = useTheme();
-  const params = useLocalSearchParams<{ day?: string; folderId?: string }>();
-  const { folders, add } = useAddSession();
+  const params = useLocalSearchParams<{ day?: string; folderId?: string; sessionId?: string }>();
+  const adding = useAddSession();
+  // `sessionId` = edit mode (same form, prefilled; saves over the stored record).
+  const editing = useEditSession(params.sessionId ?? '');
+  const isEdit = params.sessionId !== undefined && params.sessionId !== '';
+  const session = isEdit ? editing.session : undefined;
+  const folders = adding.folders;
   const colorFor = useFolderColors(folders);
   // The screen mounts per visit, so "now" is when it was opened (preview only; submit validates again).
   const [openedAt] = useState(() => Date.now());
   const today = startOfLocalDay(openedAt);
   const days = recentDays(today);
   const requested = Number(params.day);
-  const initialDay = startOfLocalDay(Number.isFinite(requested) && requested > 0 ? requested : today);
+  const initialDay = startOfLocalDay(
+    session ? session.startedAt : Number.isFinite(requested) && requested > 0 ? requested : today,
+  );
+  const initialFolder = session ? session.folderId : (params.folderId ?? null);
 
   const [dayStart, setDayStart] = useState(initialDay);
   const [folderId, setFolderId] = useState<string | null>(
-    params.folderId && folders.some((f) => f.id === params.folderId) ? params.folderId : null,
+    initialFolder && folders.some((f) => f.id === initialFolder) ? initialFolder : null,
   );
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState(() => formatClock(openedAt));
+  const [start, setStart] = useState(() => (session ? formatClock(session.startedAt) : ''));
+  const [end, setEnd] = useState(() => formatClock(session ? session.endedAt : openedAt));
   const [error, setError] = useState<string | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [pickingDay, setPickingDay] = useState(false);
 
   // A past day outside the last 7 stays selectable when we were sent here from its daily screen.
   const dayOptions = days.includes(dayStart) ? days : [dayStart, ...days];
-  const preview = buildManualSession({ dayStart, start, end }, openedAt);
+  const preview = session
+    ? buildEditedSession({ dayStart, start, end }, openedAt, session)
+    : buildManualSession({ dayStart, start, end }, openedAt);
   const folderName = folders.find((f) => f.id === folderId)?.name ?? '未分類';
 
   const submit = () => {
-    const result = add({ dayStart, start, end, folderId });
+    const result = isEdit
+      ? editing.save({ dayStart, start, end, folderId })
+      : adding.add({ dayStart, start, end, folderId });
     if (result.ok) router.back();
     else setError(result.error);
   };
 
   return (
-    <SettingsScaffold title="記録を追加" closeIcon gap={20}>
+    <SettingsScaffold title={isEdit ? '記録を編集' : '記録を追加'} closeIcon gap={20}>
       <Text
         style={{
           fontFamily: fontFamily.bold,
@@ -161,7 +180,9 @@ export function AddSessionScreen() {
           color: colors.textSecondary,
         }}
       >
-        タイマーを使わなかった学習も、あとから記録できます。
+        {isEdit
+          ? '日付・時刻・フォルダーを変更できます。学習時間は開始と終了から計算されます。'
+          : 'タイマーを使わなかった学習も、あとから記録できます。'}
       </Text>
       <View style={{ flexDirection: 'row' }}>
         <Field label="フォルダー">
@@ -230,7 +251,11 @@ export function AddSessionScreen() {
           {error}
         </Text>
       )}
-      <Button label="記録する" onPress={submit} disabled={!preview.ok} />
+      <Button
+        label={isEdit ? '保存する' : '記録する'}
+        onPress={submit}
+        disabled={!preview.ok || (isEdit && !session)}
+      />
 
       <FolderPickerSheet
         visible={pickingFolder}

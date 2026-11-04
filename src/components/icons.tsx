@@ -34,7 +34,9 @@ export type IconName =
   | 'edit'
   | 'trash'
   | 'calendar'
-  | 'star';
+  | 'star'
+  | 'volume'
+  | 'volume-off';
 
 type Props = {
   name: IconName;
@@ -173,6 +175,18 @@ export function Icon({ name, size, color, strokeWidth = 2, handsColor }: Props) 
         <>
           <Path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" {...common} />
           <Path d="M10 21h4" {...common} />
+        </>
+      )}
+      {name === 'volume' && (
+        <>
+          <Path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" {...common} />
+          <Path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" {...common} />
+        </>
+      )}
+      {name === 'volume-off' && (
+        <>
+          <Path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" {...common} />
+          <Path d="M16 9.5l5 5M21 9.5l-5 5" {...common} />
         </>
       )}
       {name === 'moon' && <Path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z" {...common} />}

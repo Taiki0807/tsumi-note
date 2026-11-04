@@ -8,6 +8,8 @@ import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/desi
 import { FolderFormSheet } from '@/features/library/folder-form-sheet';
 import { formatFocusMinutes } from '@/features/records/records-logic';
 import { useTodayStats } from '@/features/records/use-today-stats';
+import { TIMER_ALARM_MODE_LABELS } from '@/domain/app-settings';
+import { AlarmModeSheet } from '@/features/timer/alarm-mode-sheet';
 import { FolderPickerSheet } from '@/features/timer/folder-picker-sheet';
 import { TimerRing } from '@/features/timer/timer-ring';
 import { TimerSettingsModal } from '@/features/timer/timer-settings-modal';
@@ -63,6 +65,7 @@ export default function TimerScreen() {
   const timer = useTimer();
   const today = useTodayStats(timer.savedCount);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAlarm, setShowAlarm] = useState(false);
   // `state.settings` is the session snapshot; `settings` is the editable value for the next start.
   const { state, settings } = timer;
   const { status } = state;
@@ -99,6 +102,18 @@ export default function TimerScreen() {
         <Text className="flex-1 font-extrabold text-heading" style={{ color: colors.textPrimary }}>
           タイマー
         </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`アラーム音 ${TIMER_ALARM_MODE_LABELS[timer.alarmMode]}`}
+          onPress={() => setShowAlarm(true)}
+          style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Icon
+            name={timer.alarmMode === 'silent' ? 'volume-off' : 'volume'}
+            size={22}
+            color={colors.textPrimary}
+          />
+        </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="タイマー設定"
@@ -250,6 +265,12 @@ export default function TimerScreen() {
         submitLabel="作成して選択"
         onSubmit={timer.createFolder}
         onClose={() => setShowCreateFolder(false)}
+      />
+      <AlarmModeSheet
+        visible={showAlarm}
+        mode={timer.alarmMode}
+        onSelect={timer.setAlarmMode}
+        onClose={() => setShowAlarm(false)}
       />
       <TimerSettingsModal
         visible={showSettings}

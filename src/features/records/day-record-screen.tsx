@@ -1,8 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { Button } from '@/components/form-ui';
+import { Icon } from '@/components/icons';
 import { fontFamily, typography, useTheme } from '@/design';
 import { SettingsScaffold } from '@/features/settings/settings-ui';
 
@@ -125,10 +126,14 @@ export function DayRecordScreen() {
       ) : (
         <View style={{ ...card, paddingHorizontal: 20, paddingVertical: 6 }}>
           {view?.sessions.map((s, i) => (
-            <View
+            <Pressable
               key={s.id}
+              accessibilityRole="button"
               accessibilityLabel={`${formatSessionRange(s.startedAt, s.endedAt)} ${nameOf(s.folderId)} ${formatMinutes(s.durationSeconds)}`}
+              accessibilityHint="タップして記録を編集します"
+              onPress={() => router.push({ pathname: '/records/add', params: { sessionId: s.id } })}
               style={{
+                minHeight: 44,
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 12,
@@ -179,7 +184,8 @@ export function DayRecordScreen() {
               >
                 {formatMinutes(s.durationSeconds)}
               </Text>
-            </View>
+              <Icon name="chevron-right" size={18} color={colors.textSecondary} strokeWidth={1.8} />
+            </Pressable>
           ))}
         </View>
       )}

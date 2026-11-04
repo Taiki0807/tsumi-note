@@ -3,7 +3,7 @@ import { Linking, Switch, Text, View } from 'react-native';
 
 import { Button, TextField } from '@/components/form-ui';
 import { fontFamily, radius, typography, useTheme } from '@/design';
-import { formatReminderTime, parseReminderTime } from '@/domain/app-settings';
+import { formatReminderTime, parseReminderTime, withSound } from '@/domain/app-settings';
 
 import { SettingsScaffold } from './settings-ui';
 import { useReminderSettings, useTimerAlerts } from './use-settings';
@@ -153,7 +153,7 @@ export function NotificationSettingsScreen() {
           label="通知音"
           description="集中・休憩の終了時に音でお知らせします"
           value={timerAlerts.sound}
-          onChange={(sound) => updateTimerAlerts({ ...timerAlerts, sound })}
+          onChange={(sound) => updateTimerAlerts(withSound(timerAlerts, sound))}
         />
         <AlertRow
           label="バイブレーション"

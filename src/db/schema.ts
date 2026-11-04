@@ -4,7 +4,7 @@ import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm
  * Local-first schema (docs/ARCHITECTURE.md §6-§14).
  *
  * - Mutable entities: `id` (UUID, generated offline) + `createdAt` / `updatedAt` / `deletedAt` (tombstone).
- * - Append-only events: `id` + `createdAt` only. Never updated or deleted by the app.
+ * - Append-only events (answer / review history): `id` + `createdAt` only. Never updated or deleted by the app.
  * - All timestamps are epoch milliseconds (UTC).
  * - Review History (append-only) and FSRS state (mutable, current only) are separate tables.
  * - Account / owner columns are intentionally absent until the Phase 8 auth + sync design decides
@@ -28,6 +28,12 @@ const appendOnlyColumns = {
 export const folders = sqliteTable('folders', {
   ...mutableColumns,
   name: text('name').notNull(),
+  /**
+   * Palette key (`src/design/folder-palette.ts`), e.g. 'primary' / 'warning' / 'info' / 'rose'.
+   * `null` = never chosen (rows synced from an app version without this column): the UI then falls
+   * back to the legacy creation-order cycle. Unknown keys are tolerated the same way.
+   */
+  color: text('color'),
 });
 
 export const notes = sqliteTable(
@@ -104,12 +110,16 @@ export const fsrsStates = sqliteTable(
   (t) => [index('fsrs_states_due_idx').on(t.due)],
 );
 
-// ---------- Append-only events ----------
+// ---------- Study sessions (mutable since migration 0006) and append-only events ----------
 
 export const studySessions = sqliteTable(
   'study_sessions',
   {
-    ...appendOnlyColumns,
+    id: text('id').primaryKey(),
+    createdAt: integer('created_at').notNull(),
+    /** Added by migration 0006 (backfilled with `created_at`); the DEFAULT only serves the ALTER. */
+    updatedAt: integer('updated_at').notNull().default(0),
+    deletedAt: integer('deleted_at'),
     folderId: text('folder_id').references(() => folders.id),
     startedAt: integer('started_at').notNull(),
     endedAt: integer('ended_at').notNull(),

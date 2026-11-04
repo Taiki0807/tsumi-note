@@ -38,8 +38,8 @@ export function useFolderList() {
     ...list,
     query,
     setQuery,
-    createFolder: (name: string) => {
-      const folder = repos.folders.create({ name });
+    createFolder: (name: string, color?: string) => {
+      const folder = repos.folders.create({ name, color });
       invalidate();
       return folder;
     },
@@ -74,8 +74,8 @@ export function useFolderDetail(folderId: string) {
     setQuery,
     filter,
     setFilter,
-    renameFolder: (name: string) => {
-      repos.folders.rename(folderId, name);
+    renameFolder: (name: string, color?: string) => {
+      repos.folders.rename(folderId, name, color);
       invalidate();
     },
     deleteFolder: () => {

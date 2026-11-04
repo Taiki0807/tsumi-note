@@ -18,7 +18,7 @@ export type WeeklyRecordView = {
   understanding: Understanding;
   /** 「今週の要復習」: highest error-rate question of the same week and folder filter. */
   needsReview: NeedsReview | null;
-  folders: { id: string; name: string }[];
+  folders: { id: string; name: string; color?: string | null }[];
 };
 
 /**
@@ -33,7 +33,7 @@ export function loadWeeklyRecord(
 ): WeeklyRecordView {
   const sessions = studySessions.listBetween(addWeeks(weekStart, -1), addWeeks(weekStart, 1));
   const answers = review.listAnswersBetween(weekStart, addWeeks(weekStart, 1), folderId);
-  const folderList = folders.list().map(({ id, name }) => ({ id, name }));
+  const folderList = folders.list().map(({ id, name, color }) => ({ id, name, color }));
   return {
     record: buildWeeklyRecord(
       sessions,

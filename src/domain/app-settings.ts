@@ -23,31 +23,71 @@ export const APP_SETTING_KEYS = {
   reminderTime: 'notification.reminderTime',
   timerSound: 'notification.timerSound',
   timerVibration: 'notification.timerVibration',
+  timerAlarmMode: 'notification.timerAlarmMode',
 } as const;
 
-/** Timer end alerts (v1.1.0). Both are on by default: the sound already played before it became a setting. */
+/**
+ * タイマー終了時のアラーム音: 長め = iOS標準の通知音を約30秒繰り返す / 短め = 通知音を1回 / 無音。
+ * 端末固有の設定なので同期しない（同期対象の `timer.*` キーは focusMinutes / breakMinutes / rounds のみ）。
+ */
+export type TimerAlarmMode = 'long' | 'short' | 'silent';
+
+export const TIMER_ALARM_MODES: readonly TimerAlarmMode[] = ['long', 'short', 'silent'];
+
+export const TIMER_ALARM_MODE_LABELS: Record<TimerAlarmMode, string> = {
+  long: '長め',
+  short: '短め',
+  silent: '無音',
+};
+
+/**
+ * Timer end alerts. `sound` is always `alarmMode !== 'silent'`; it stays as the older ON/OFF value so the
+ * 通知設定 switch and data written by earlier versions keep working.
+ */
 export type TimerAlertSettings = {
   sound: boolean;
   vibration: boolean;
+  alarmMode: TimerAlarmMode;
 };
 
-export const DEFAULT_TIMER_ALERTS: TimerAlertSettings = { sound: true, vibration: true };
+/** Both on by default: the sound already played (once = 短め) before it became a setting. */
+export const DEFAULT_TIMER_ALERTS: TimerAlertSettings = { sound: true, vibration: true, alarmMode: 'short' };
+
+export function parseTimerAlarmMode(raw: string | undefined): TimerAlarmMode | undefined {
+  return TIMER_ALARM_MODES.find((mode) => mode === raw);
+}
+
+export function withAlarmMode(alerts: TimerAlertSettings, alarmMode: TimerAlarmMode): TimerAlertSettings {
+  return { ...alerts, alarmMode, sound: alarmMode !== 'silent' };
+}
+
+/** The 通知音 switch: OFF = 無音; ON restores the last audible mode (or 短め after 無音). */
+export function withSound(alerts: TimerAlertSettings, sound: boolean): TimerAlertSettings {
+  if (!sound) return withAlarmMode(alerts, 'silent');
+  return withAlarmMode(alerts, alerts.alarmMode === 'silent' ? 'short' : alerts.alarmMode);
+}
 
 export function parseTimerAlerts(get: (key: string) => string | undefined): TimerAlertSettings {
   const read = (key: string, fallback: boolean) => {
     const raw = get(key);
     return raw === 'true' ? true : raw === 'false' ? false : fallback;
   };
+  const sound = read(APP_SETTING_KEYS.timerSound, DEFAULT_TIMER_ALERTS.sound);
+  // Backward compatible: without a stored mode it follows the old ON/OFF value (ON = 短め, as before).
+  // A stored mode wins over a conflicting `sound` value so the two can never disagree.
+  const alarmMode = parseTimerAlarmMode(get(APP_SETTING_KEYS.timerAlarmMode)) ?? (sound ? 'short' : 'silent');
   return {
-    sound: read(APP_SETTING_KEYS.timerSound, DEFAULT_TIMER_ALERTS.sound),
+    sound: alarmMode !== 'silent',
     vibration: read(APP_SETTING_KEYS.timerVibration, DEFAULT_TIMER_ALERTS.vibration),
+    alarmMode,
   };
 }
 
 export function serializeTimerAlerts(alerts: TimerAlertSettings): Record<string, string> {
   return {
-    [APP_SETTING_KEYS.timerSound]: String(alerts.sound),
+    [APP_SETTING_KEYS.timerSound]: String(alerts.alarmMode !== 'silent'),
     [APP_SETTING_KEYS.timerVibration]: String(alerts.vibration),
+    [APP_SETTING_KEYS.timerAlarmMode]: alerts.alarmMode,
   };
 }
 

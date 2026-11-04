@@ -323,7 +323,8 @@ export function FolderDetailScreen() {
       <FolderFormSheet
         visible={sheet.kind === 'rename'}
         initialName={detail.folder.name}
-        onSubmit={(name) => folder.renameFolder(name)}
+        initialColor={detail.folder.color}
+        onSubmit={(name, color) => folder.renameFolder(name, color)}
         onClose={close}
       />
       <ConfirmDeleteSheet

@@ -1,4 +1,4 @@
-import { CONFLICT_COPY_PREFIX, type EntitySpec } from './entities';
+import { CONFLICT_COPY_PREFIX, ENTITY_BY_NAME, fillLegacy, type EntitySpec } from './entities';
 import { PULL_BUDGET_CHARS, type Change, type RecordData, type Value } from './validate';
 
 /**
@@ -96,6 +96,8 @@ export function decide(c: Change, s: Stored | undefined): Decision {
   const { spec } = c;
   if (!s) return { write: true, conflict: false };
   if (sameData(spec, s.data, c.data)) return { write: false, status: 'noop', conflict: false };
+  // 追記専用だった頃の旧版アプリからの送信(旧形式)は、既にあれば無視する。新版での編集・削除を巻き戻さない
+  if (spec.legacyAppend && c.filled?.length) return { write: false, status: 'noop', conflict: false };
 
   switch (spec.kind) {
     case 'append':
@@ -149,7 +151,15 @@ async function loadStored(
           .join(',')})`,
         params: [userId, entity, ...part],
       });
-      for (const r of rows) out.set(keyOf(entity, r.id), { data: JSON.parse(r.data), seq: r.server_seq });
+      const spec = ENTITY_BY_NAME.get(entity);
+      for (const r of rows) {
+        const parsed = JSON.parse(r.data) as RecordData;
+        // 旧形式で保存済みのレコードは、後から追加した列を補って比較する
+        out.set(keyOf(entity, r.id), {
+          data: spec ? (fillLegacy(spec, parsed).data as RecordData) : parsed,
+          seq: r.server_seq,
+        });
+      }
     }
   }
   return out;
@@ -184,8 +194,14 @@ export async function pushChanges(
   type Plan = { change: Change; decision: Decision; writeIndex: number | null };
   const plans: Plan[] = [];
 
-  for (const c of pending) {
-    const s = stored.get(keyOf(c.spec.name, c.id));
+  for (const original of pending) {
+    const s = stored.get(keyOf(original.spec.name, original.id));
+    // 旧バージョンのアプリは後から追加した列(フォルダーの色など)を知らない。保存済みの値を消さないよう引き継ぐ
+    let c = original;
+    if (s && original.filled?.length && !original.spec.legacyAppend) {
+      c = { ...original, data: { ...original.data } };
+      for (const name of original.filled) c.data[name] = s.data[name] ?? null;
+    }
     const decision = decide(c, s);
     let writeIndex: number | null = null;
     if (decision.copy) {

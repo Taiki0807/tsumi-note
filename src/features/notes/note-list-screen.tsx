@@ -26,7 +26,7 @@ function NoteListRow({
   onMenu: () => void;
 }) {
   const colors = useTheme();
-  const tone = useFolderTone(row.folderIndex);
+  const tone = useFolderTone(row.folderIndex, row.folder?.color);
   const title = noteDisplayTitle(row.note.title);
   return (
     <View

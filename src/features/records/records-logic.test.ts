@@ -263,7 +263,7 @@ describe('records from SQLite (Phase 2 → Phase 3)', () => {
     const all = loadWeeklyRecord(repos, WEEK);
     expect(all.record.totalSeconds / 60).toBe(50);
     expect(all.record.previousTotalSeconds / 60).toBe(40);
-    expect(all.folders).toEqual([{ id: folder.id, name: '韓国語' }]);
+    expect(all.folders).toEqual([{ id: folder.id, name: '韓国語', color: 'primary' }]);
 
     const only = loadWeeklyRecord(repos, WEEK, folder.id);
     expect(only.record.totalSeconds / 60).toBe(25);
