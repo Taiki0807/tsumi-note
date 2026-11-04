@@ -37,7 +37,9 @@ describe('folder repository (mutable entity)', () => {
   it('accepts an explicit palette color and ignores unknown values', () => {
     const { repos } = setup();
     expect(repos.folders.create({ name: 'a', color: 'rose' }).color).toBe('rose');
-    expect(repos.folders.create({ name: 'b', color: '#ff0000' }).color).toBe('primary');
+    expect(repos.folders.create({ name: 'b', color: '#ff0000' }).color).toBe('#FF0000');
+    expect(repos.folders.create({ name: 'c', color: '#ff000080' }).color).toBe('primary');
+    expect(repos.folders.create({ name: 'd', color: 'nope' }).color).toBe('warning');
   });
 
   it('saves a color on rename / setColor and bumps updatedAt', () => {

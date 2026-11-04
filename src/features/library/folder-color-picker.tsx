@@ -1,22 +1,28 @@
-import { Pressable, Text, View } from 'react-native';
+import { ColorPicker, Host } from '@expo/ui/swift-ui';
+import { Platform, Pressable, Text, View } from 'react-native';
 
 import { Icon } from '@/components/icons';
 import {
+  CUSTOM_COLOR_LABEL,
+  CUSTOM_COLOR_SYMBOL,
   FOLDER_PALETTE,
   folderColorLabel,
   folderColorSymbol,
   fontFamily,
   folderTone,
+  normalizeHexColor,
   typography,
   useTheme,
   useThemeName,
-  type FolderColorKey,
+  type FolderColorValue,
 } from '@/design';
 
 type Props = {
-  value: FolderColorKey;
-  onChange: (key: FolderColorKey) => void;
+  value: FolderColorValue;
+  onChange: (key: FolderColorValue) => void;
 };
+
+const FALLBACK_PICKER_COLOR = '#7C5CFC';
 
 /**
  * Folder color choice (folder create / edit sheet). Five swatches per row; each swatch is a ≥ 44pt tap
@@ -95,12 +101,92 @@ export function FolderColorPicker({ value, onChange }: Props) {
             </Pressable>
           );
         })}
+        {Platform.OS === 'ios' && (
+          <CustomColorCell value={value} onChange={onChange} />
+        )}
       </View>
       <Text
         accessibilityLiveRegion="polite"
         style={{ fontFamily: fontFamily.bold, fontSize: 13, lineHeight: 18, color: colors.textSecondary }}
       >
         選択中: {folderColorSymbol(value)} {folderColorLabel(value)}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * 「その他の色」: the swatch is drawn in React Native (ring + check like the palette); the iOS standard
+ * `ColorPicker` (SwiftUI, no opacity) sits invisibly on top and receives the tap that opens the system
+ * picker. Not in Figma — composed from existing tokens.
+ */
+function CustomColorCell({ value, onChange }: Props) {
+  const colors = useTheme();
+  const isDark = useThemeName() === 'dark';
+  const custom = normalizeHexColor(value);
+  const selected = custom !== null;
+  const tone = folderTone(value, colors, isDark);
+  return (
+    <View
+      accessibilityRole="radio"
+      accessibilityLabel={`その他の色（${CUSTOM_COLOR_LABEL}）`}
+      accessibilityHint="タップするとカラーピッカーが開きます"
+      accessibilityState={{ selected }}
+      style={{ width: '20%', minHeight: 48, alignItems: 'center', gap: 4 }}
+    >
+      <View
+        style={{
+          width: 48,
+          height: 48,
+          borderRadius: 24,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: selected ? 3 : 1,
+          borderColor: selected ? colors.textPrimary : colors.border,
+          backgroundColor: selected ? tone.tile : colors.surface,
+        }}
+      >
+        <View
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: selected ? tone.icon : colors.textSecondary,
+          }}
+        >
+          {selected ? (
+            <Icon name="check" size={18} color={colors.background} strokeWidth={3} />
+          ) : (
+            <Text accessible={false} style={{ fontSize: 14, lineHeight: 18, color: colors.background }}>
+              {CUSTOM_COLOR_SYMBOL}
+            </Text>
+          )}
+        </View>
+        <View style={{ position: 'absolute', width: 48, height: 48, opacity: 0.02 }}>
+          <Host style={{ width: 48, height: 48 }}>
+            <ColorPicker
+              selection={custom ?? normalizeHexColor(tone.icon) ?? FALLBACK_PICKER_COLOR}
+              supportsOpacity={false}
+              onSelectionChange={(hex) => {
+                const next = normalizeHexColor(hex.slice(0, 7));
+                if (next) onChange(next);
+              }}
+            />
+          </Host>
+        </View>
+      </View>
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily: selected ? fontFamily.extraBold : fontFamily.bold,
+          fontSize: 11,
+          lineHeight: 14,
+          color: selected ? colors.textPrimary : colors.textSecondary,
+        }}
+      >
+        その他の色
       </Text>
     </View>
   );

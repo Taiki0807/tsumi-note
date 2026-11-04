@@ -1,6 +1,6 @@
 import { and, asc, count, eq, isNull } from 'drizzle-orm';
 
-import { isFolderColorKey, nextFolderColorKey } from '../../design/folder-palette';
+import { nextFolderColorKey, parseFolderColor } from '../../design/folder-palette';
 import { normalizeFolderName } from '../../domain/validation';
 import { folders, notes, questions } from '../schema';
 import type { RepositoryDeps } from '../types';
@@ -24,9 +24,9 @@ export function createFolderRepository({ db, now, newId }: RepositoryDeps) {
     create(input: { name: string; color?: string }): Folder {
       const name = normalizeFolderName(input.name);
       const timestamp = now();
-      const color = isFolderColorKey(input.color)
-        ? input.color
-        : nextFolderColorKey(
+      const color =
+        parseFolderColor(input.color) ??
+        nextFolderColorKey(
             db
               .select({ color: folders.color })
               .from(folders)
@@ -78,16 +78,18 @@ export function createFolderRepository({ db, now, newId }: RepositoryDeps) {
     /** Renames the folder; an optional palette `color` is saved in the same write. */
     rename(id: string, name: string, color?: string): void {
       const normalized = normalizeFolderName(name);
+      const parsed = parseFolderColor(color);
       db.update(folders)
-        .set({ name: normalized, ...(isFolderColorKey(color) ? { color } : {}), updatedAt: now() })
+        .set({ name: normalized, ...(parsed ? { color: parsed } : {}), updatedAt: now() })
         .where(and(eq(folders.id, id), isNull(folders.deletedAt)))
         .run();
     },
 
     setColor(id: string, color: string): void {
-      if (!isFolderColorKey(color)) return;
+      const parsed = parseFolderColor(color);
+      if (!parsed) return;
       db.update(folders)
-        .set({ color, updatedAt: now() })
+        .set({ color: parsed, updatedAt: now() })
         .where(and(eq(folders.id, id), isNull(folders.deletedAt)))
         .run();
     },

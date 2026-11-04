@@ -11,7 +11,7 @@ import {
   resolveFolderColorKey,
   typography,
   useTheme,
-  type FolderColorKey,
+  type FolderColorValue,
 } from '@/design';
 import { isBlank, ValidationError } from '@/domain/validation';
 
@@ -23,7 +23,7 @@ type Props = {
   initialName?: string;
   /** Saved palette key of the folder being edited (create mode: the first palette color is preselected). */
   initialColor?: string | null;
-  onSubmit: (name: string, color: FolderColorKey) => void;
+  onSubmit: (name: string, color: FolderColorValue) => void;
   onClose: () => void;
   /** Hint under the title (create mode). Figma 01c (from the timer) words it differently from 12. */
   subtitle?: string;
@@ -54,10 +54,10 @@ function FolderForm({
   const [name, setName] = useState(initialName ?? '');
   const repos = useRepositories();
   // Create mode preselects the first palette color no live folder uses yet.
-  const [color, setColor] = useState<FolderColorKey>(() =>
+  const [color, setColor] = useState<FolderColorValue>(() =>
     editing
       ? resolveFolderColorKey(initialColor, 0)
-      : ((initialColor as FolderColorKey | undefined) ??
+      : ((initialColor as FolderColorValue | undefined) ??
         nextFolderColorKey(repos.folders.list().map((f) => f.color))),
   );
   const [error, setError] = useState<string | null>(null);

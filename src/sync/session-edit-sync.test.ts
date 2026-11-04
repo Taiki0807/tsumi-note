@@ -99,6 +99,23 @@ describe('学習記録の編集の同期', () => {
     expect(b.repos.folders.getById(f.id)?.color).toBe('teal');
   });
 
+  it('カスタム色(#RRGGBB)も正規化されて同期で往復する', async () => {
+    const { a, b, ca, cb } = setup();
+    const f = a.repos.folders.create({ name: 'F', color: '#1a2b3c' });
+    expect(f.color).toBe('#1A2B3C');
+    await a.sync(ca.transport);
+    await b.sync(cb.transport);
+    expect(b.repos.folders.getById(f.id)?.color).toBe('#1A2B3C');
+    a.tick();
+    a.repos.folders.setColor(f.id, '#fa0');
+    await a.sync(ca.transport);
+    await b.sync(cb.transport);
+    expect(b.repos.folders.getById(f.id)?.color).toBe('#FFAA00');
+    a.tick();
+    a.repos.folders.setColor(f.id, '#12345678'); // alpha / invalid is ignored
+    expect(a.repos.folders.getById(f.id)?.color).toBe('#FFAA00');
+  });
+
   it('旧形式(updated_at / deleted_at / color なし)のサーバーデータも取り込める', async () => {
     // 旧バージョンの端末が送った形式をそのままサーバーに置く
     const server = createTestServer(['u1']);

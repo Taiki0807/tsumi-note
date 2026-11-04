@@ -511,6 +511,14 @@ describe('学習記録の編集と旧バージョンとの互換性', () => {
     expect(rec.data).toMatchObject({ name: 'F改', color: 'rose' });
   });
 
+  test('フォルダー: カスタム色(#RRGGBB)がそのまま往復する', async () => {
+    const { h, a } = await setup();
+    const data = { name: 'F', color: '#1A2B3C', created_at: 1, updated_at: 1, deleted_at: null };
+    expect((await push(h, a, [change('folders', 'f1', data)])).status).toBe(200);
+    const rec = (await pull(h, a)).body.changes.find((c: any) => c.entity === 'folders');
+    expect(rec.data.color).toBe('#1A2B3C');
+  });
+
   test('フォルダー: 旧バージョンの新規作成は color = null で保存される', async () => {
     const { h, a } = await setup();
     const legacy = { name: 'F', created_at: 1, updated_at: 1, deleted_at: null };
