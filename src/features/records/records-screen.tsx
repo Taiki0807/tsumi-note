@@ -472,6 +472,20 @@ export function RecordsScreen() {
             </View>
           )}
 
+          {/* Figma 192:166 › tap hint: 11pt Bold, primary. Only when there are bars to tap. */}
+          {record && record.totalSeconds > 0 && (
+            <Text
+              style={{
+                fontFamily: fontFamily.bold,
+                fontSize: 11,
+                lineHeight: 16,
+                color: colors.primary,
+              }}
+            >
+              棒をタップすると、その日の記録が見られます
+            </Text>
+          )}
+
           {record && record.totalSeconds === 0 && (
             <Text
               style={{
