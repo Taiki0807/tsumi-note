@@ -1,15 +1,19 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { Pressable, Text, View, type HostInstance } from 'react-native';
 
 import { Button } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, typography, useTheme } from '@/design';
 import { SettingsScaffold } from '@/features/settings/settings-ui';
 
+import { captureShareImage } from './capture-share-image';
 import { useFolderColors } from './folder-colors';
 import { formatClock, formatMinutes, formatMonthDay, formatSessionRange } from './manual-session';
 import { startOfLocalDay } from './records-logic';
+import { ShareButton } from './share-button';
+import { DayShareImageView } from './share-image-view';
+import { buildDayShareModel } from './share-model';
 import { useDayRecord } from './use-day-record';
 
 const CARD = 24;
@@ -34,8 +38,29 @@ export function DayRecordScreen() {
     backgroundColor: colors.surface,
   } as const;
 
+  const shareRef = useRef<HostInstance>(null);
+  // No sessions → no model → the 共有 button is disabled and nothing is rendered off-screen.
+  const shareModel = useMemo(
+    () =>
+      view && view.sessions.length > 0
+        ? buildDayShareModel({ dayStart, sessions: view.sessions, folders: view.folders })
+        : null,
+    [view, dayStart],
+  );
+
   return (
-    <SettingsScaffold title={`${formatMonthDay(dayStart)}の記録`} gap={16}>
+    <SettingsScaffold
+      title={`${formatMonthDay(dayStart)}の記録`}
+      gap={16}
+      headerRight={
+        <ShareButton
+          accessibilityLabel="この日の記録を画像で共有"
+          disabled={!shareModel}
+          capture={() => captureShareImage(shareRef)}
+        />
+      }
+      overlay={shareModel && <DayShareImageView ref={shareRef} model={shareModel} colorFor={colorFor} />}
+    >
       {view && view.sessions.length > 0 && (
         <View style={{ ...card, gap: 14, padding: 20 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>

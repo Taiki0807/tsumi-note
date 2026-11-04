@@ -1,4 +1,6 @@
+import { formatMinutes, formatMonthDay } from './manual-session';
 import {
+  addDays,
   chartMaxHours,
   formatDayLabel,
   formatDiff,
@@ -61,6 +63,33 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
+ * Folder totals → rows, longest first (ties by name). Everything past `MAX_SHARE_FOLDER_ROWS` is merged into
+ * 「その他」. Shared by the weekly and the daily share image.
+ */
+function buildFolderRows(
+  totals: Map<string | null, number>,
+  nameOf: (id: string | null) => string,
+  format: (seconds: number) => string,
+): ShareFolderRow[] {
+  const sorted = [...totals.entries()]
+    .filter(([, seconds]) => seconds > 0)
+    .sort((a, b) => b[1] - a[1] || nameOf(a[0]).localeCompare(nameOf(b[0])));
+  const rows: ShareFolderRow[] = sorted.slice(0, MAX_SHARE_FOLDER_ROWS).map(([id, seconds]) => ({
+    folderId: id,
+    isOther: false,
+    name: nameOf(id),
+    seconds,
+    durationLabel: format(seconds),
+  }));
+  const rest = sorted.slice(MAX_SHARE_FOLDER_ROWS);
+  if (rest.length > 0) {
+    const seconds = rest.reduce((sum, [, s]) => sum + s, 0);
+    rows.push({ folderId: null, isOther: true, name: 'その他', seconds, durationLabel: format(seconds) });
+  }
+  return rows;
+}
+
+/**
  * Pure mapping from the weekly record currently shown on screen to the share image content.
  * `folders` is the folder list used for names; `folderId` is the active filter (undefined = すべて).
  */
@@ -77,27 +106,7 @@ export function buildShareModel(input: {
   for (const day of record.days) {
     for (const s of day.segments) totals.set(s.folderId, (totals.get(s.folderId) ?? 0) + s.seconds);
   }
-  const sorted = [...totals.entries()]
-    .filter(([, seconds]) => seconds > 0)
-    .sort((a, b) => b[1] - a[1] || nameOf(a[0]).localeCompare(nameOf(b[0])));
-  const folderRows: ShareFolderRow[] = sorted.slice(0, MAX_SHARE_FOLDER_ROWS).map(([id, seconds]) => ({
-    folderId: id,
-    isOther: false,
-    name: nameOf(id),
-    seconds,
-    durationLabel: formatDuration(seconds),
-  }));
-  const rest = sorted.slice(MAX_SHARE_FOLDER_ROWS);
-  if (rest.length > 0) {
-    const seconds = rest.reduce((sum, [, s]) => sum + s, 0);
-    folderRows.push({
-      folderId: null,
-      isOther: true,
-      name: 'その他',
-      seconds,
-      durationLabel: formatDuration(seconds),
-    });
-  }
+  const folderRows = buildFolderRows(totals, nameOf, formatDuration);
 
   const maxHours = chartMaxHours(record.days);
   const bars: ShareBar[] = record.days.map((day) => ({
@@ -122,5 +131,80 @@ export function buildShareModel(input: {
     folderRows,
     bars,
     maxHours,
+  };
+}
+
+export type ShareTimelineBand = {
+  folderId: string | null;
+  /** Start position on the 0:00–24:00 axis, 0..1. */
+  left: number;
+  /** Length on the axis, 0..1 (clipped to the day). */
+  width: number;
+};
+
+export type DayShareModel = {
+  appName: string;
+  /** e.g. 「11月5日（水）」. */
+  dateLabel: string;
+  /** e.g. 「11月5日（水）の学習記録」. */
+  titleLabel: string;
+  totalSeconds: number;
+  totalLabel: string;
+  /** e.g. 「4セッション」. */
+  sessionCountLabel: string;
+  folderRows: ShareFolderRow[];
+  bands: ShareTimelineBand[];
+};
+
+/** Hours labelled under the daily timeline. */
+export const TIMELINE_AXIS_HOURS = [0, 6, 12, 18, 24] as const;
+
+/**
+ * Position of a session on the day's 0:00–24:00 axis, clipped to the day (a session running past midnight
+ * only shows the part inside this day). The day length comes from the calendar, so DST days stay exact.
+ */
+export function timelineBand(
+  dayStart: number,
+  startedAt: number,
+  endedAt: number,
+): { left: number; width: number } {
+  const dayEnd = addDays(dayStart, 1);
+  const dayMs = dayEnd - dayStart;
+  const from = Math.min(Math.max(startedAt, dayStart), dayEnd);
+  const to = Math.min(Math.max(endedAt, from), dayEnd);
+  return { left: (from - dayStart) / dayMs, width: (to - from) / dayMs };
+}
+
+/**
+ * Pure mapping from one day's sessions (as 日別の記録 shows them) to the daily share image content.
+ * Durations follow the app: seconds are summed first, then floored to minutes (`formatMinutes`).
+ * Only times and folder names are used; notes / questions never reach the image.
+ */
+export function buildDayShareModel(input: {
+  dayStart: number;
+  sessions: { folderId: string | null; startedAt: number; endedAt: number; durationSeconds: number }[];
+  folders: { id: string; name: string }[];
+}): DayShareModel {
+  const { dayStart, sessions, folders } = input;
+  const nameOf = (id: string | null) =>
+    id === null ? '未分類' : (folders.find((f) => f.id === id)?.name ?? '不明なフォルダ');
+  const totals = new Map<string | null, number>();
+  let totalSeconds = 0;
+  for (const s of sessions) {
+    totals.set(s.folderId, (totals.get(s.folderId) ?? 0) + s.durationSeconds);
+    totalSeconds += s.durationSeconds;
+  }
+  const dateLabel = formatMonthDay(dayStart);
+  return {
+    appName: 'つみノート',
+    dateLabel,
+    titleLabel: `${dateLabel}の学習記録`,
+    totalSeconds,
+    totalLabel: formatMinutes(totalSeconds),
+    sessionCountLabel: `${sessions.length}セッション`,
+    folderRows: buildFolderRows(totals, nameOf, formatMinutes),
+    bands: [...sessions]
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .map((s) => ({ folderId: s.folderId, ...timelineBand(dayStart, s.startedAt, s.endedAt) })),
   };
 }
