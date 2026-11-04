@@ -75,7 +75,7 @@ const synchronizer = createNotificationSynchronizer({
   },
   hasPermission: async () => (await Notifications.getPermissionsAsync()).granted,
   getAlarmMode: () => alerts.alarmMode,
-  // 長め: bundled alarm file, 短め: standard iOS sound ('default'), 無音: `false`.
+  // 長め: bundled alarm file, 短め: shorter bundled alarm file, 無音: `false`.
   schedule: async (at, event, alarm) => {
     await Notifications.scheduleNotificationAsync({
       content: { ...MESSAGES[event], sound: alarm.sound, data: { timerNotification: true } },

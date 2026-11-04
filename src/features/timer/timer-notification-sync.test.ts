@@ -10,6 +10,7 @@ import {
 import {
   createNotificationSynchronizer,
   LONG_ALARM_SOUND_FILE,
+  SHORT_ALARM_SOUND_FILE,
   planAlarm,
   type NotificationBackend,
 } from './timer-notification-sync';
@@ -114,11 +115,12 @@ describe('alarm plan (アラーム音)', () => {
     { at: 400_000, event: 'allDone' as const },
   ];
 
-  it('短め: one sounding notification per boundary', () => {
+  it('短め: one notification per boundary, with the short bundled alarm file', () => {
     expect(planAlarm(boundaries, 'short')).toEqual([
-      { at: 100_000, event: 'focusEnd', sound: 'default' },
-      { at: 400_000, event: 'allDone', sound: 'default' },
+      { at: 100_000, event: 'focusEnd', sound: 'timer-alarm-short.wav' },
+      { at: 400_000, event: 'allDone', sound: 'timer-alarm-short.wav' },
     ]);
+    expect(SHORT_ALARM_SOUND_FILE).toBe('timer-alarm-short.wav');
   });
 
   it('無音: one silent notification per boundary', () => {

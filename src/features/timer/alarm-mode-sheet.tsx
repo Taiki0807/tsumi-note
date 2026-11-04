@@ -7,7 +7,7 @@ import { TIMER_ALARM_MODE_LABELS, TIMER_ALARM_MODES, type TimerAlarmMode } from 
 
 const DESCRIPTIONS: Record<TimerAlarmMode, string> = {
   long: 'アラーム音を約30秒鳴らします',
-  short: '通知音を1回鳴らします',
+  short: 'アラーム音を短く1回鳴らします',
   silent: '音は鳴らしません（バイブレーションは別設定）',
 };
 

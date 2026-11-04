@@ -1,5 +1,6 @@
 import { ColorPicker, Host } from '@expo/ui/swift-ui';
 import { Platform, Pressable, Text, View } from 'react-native';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 import {
   CUSTOM_COLOR_LABEL,
@@ -23,8 +24,61 @@ const FALLBACK_PICKER_COLOR = '#7C5CFC';
 const CELL = 50;
 const DOT = 40;
 const PER_ROW = 5;
-/** Figma 「その他の色」 is an angular rainbow; approximated with a ring of dots (no gradient dependency). */
-const RAINBOW = ['#ff4d4d', '#ffc400', '#3ddc84', '#1a96f0', '#b44dff', '#ff4d4d'];
+/**
+ * Figma 12 (node 197:515) › 色 › 「その他の色」: 50pt cell (no ring while unselected) > 40pt circle filled with an
+ * ANGULAR gradient (start = 3 o'clock, clockwise; handles (0.5,0.5) (1,0.5) (0.5,1)) > 26pt center hole in the
+ * surface color (variable 190:42). Stop positions are the Figma values.
+ */
+export const RAINBOW_STOPS: readonly { position: number; color: string }[] = [
+  { position: 0, color: '#FF4D4D' },
+  { position: 0.2, color: '#FFC400' },
+  { position: 0.4, color: '#3DDC84' },
+  { position: 0.6, color: '#1A96F0' },
+  { position: 0.8, color: '#B44DFF' },
+  { position: 1, color: '#FF4D4D' },
+];
+export const HOLE = 26;
+const RAINBOW_SEGMENTS = 120;
+
+function lerpHex(a: string, b: string, t: number): string {
+  const ch = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+  const c = [0, 1, 2].map((i) => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t));
+  return `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Color of the angular gradient at `position` (0..1) by linear interpolation between the Figma stops. */
+export function rainbowColorAt(position: number): string {
+  const p = Math.min(1, Math.max(0, position));
+  for (let i = 1; i < RAINBOW_STOPS.length; i++) {
+    const [prev, next] = [RAINBOW_STOPS[i - 1]!, RAINBOW_STOPS[i]!];
+    if (p <= next.position) return lerpHex(prev.color, next.color, (p - prev.position) / (next.position - prev.position));
+  }
+  return RAINBOW_STOPS[RAINBOW_STOPS.length - 1]!.color;
+}
+
+/** Thin pie slices (clockwise from 3 o'clock) approximating the angular gradient with react-native-svg. */
+function RainbowCircle({ holeColor }: { holeColor: string }) {
+  const r = DOT / 2;
+  const slices = Array.from({ length: RAINBOW_SEGMENTS }, (_, i) => {
+    const a0 = (i / RAINBOW_SEGMENTS) * 2 * Math.PI;
+    // Overlap each slice slightly into the next one so no seam shows.
+    const a1 = ((i + 1.5) / RAINBOW_SEGMENTS) * 2 * Math.PI;
+    const point = (a: number) => `${(r + r * Math.cos(a)).toFixed(3)} ${(r + r * Math.sin(a)).toFixed(3)}`;
+    return (
+      <Path
+        key={i}
+        d={`M${r} ${r} L${point(a0)} A${r} ${r} 0 0 1 ${point(a1)} Z`}
+        fill={rainbowColorAt((i + 0.5) / RAINBOW_SEGMENTS)}
+      />
+    );
+  });
+  return (
+    <Svg width={DOT} height={DOT} viewBox={`0 0 ${DOT} ${DOT}`} testID="rainbow-circle">
+      {slices}
+      <Circle cx={r} cy={r} r={HOLE / 2} fill={holeColor} />
+    </Svg>
+  );
+}
 
 /**
  * Folder color choice (folder create / edit sheet), Figma 12 › 色: label 「色」, two rows of five 50pt
@@ -99,6 +153,7 @@ function CustomColorCell({ value, onChange }: Props) {
   const tone = folderTone(value, colors, isDark);
   return (
     <View
+      accessible
       accessibilityRole="radio"
       accessibilityLabel={`その他の色（${CUSTOM_COLOR_LABEL}）`}
       accessibilityHint="タップするとカラーピッカーが開きます"
@@ -109,36 +164,7 @@ function CustomColorCell({ value, onChange }: Props) {
         <Swatch color={tone.icon} selected />
       ) : (
         <View style={{ width: CELL, height: CELL, alignItems: 'center', justifyContent: 'center' }}>
-          <View style={{ width: DOT, height: DOT, borderRadius: DOT / 2, overflow: 'hidden' }}>
-            {RAINBOW.slice(0, 5).map((c, i) => {
-              const angle = (i / 5) * 2 * Math.PI;
-              return (
-                <View
-                  key={c + i}
-                  style={{
-                    position: 'absolute',
-                    width: 14,
-                    height: 14,
-                    borderRadius: 7,
-                    backgroundColor: c,
-                    left: DOT / 2 - 7 + Math.sin(angle) * 12,
-                    top: DOT / 2 - 7 - Math.cos(angle) * 12,
-                  }}
-                />
-              );
-            })}
-            <View
-              style={{
-                position: 'absolute',
-                left: 13,
-                top: 13,
-                width: 14,
-                height: 14,
-                borderRadius: 7,
-                backgroundColor: colors.surface,
-              }}
-            />
-          </View>
+          <RainbowCircle holeColor={colors.surface} />
         </View>
       )}
       <View style={{ position: 'absolute', width: CELL, height: CELL, opacity: 0.02 }}>
