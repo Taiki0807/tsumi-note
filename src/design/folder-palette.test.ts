@@ -1,6 +1,8 @@
 import {
   FOLDER_COLOR_KEYS,
   FOLDER_PALETTE,
+  folderColorLabel,
+  folderColorSymbol,
   folderTone,
   isFolderColorKey,
   nextFolderColorKey,
@@ -46,6 +48,12 @@ describe('folder palette', () => {
     expect(resolveFolderColorKey('not-a-color', 5)).toBe('info');
     expect(isFolderColorKey('teal')).toBe(true);
     expect(isFolderColorKey('#ff0000')).toBe(false);
+  });
+
+  it('exposes the name and symbol shown next to the picker', () => {
+    expect(FOLDER_PALETTE).toHaveLength(10);
+    expect(folderColorLabel('teal')).toBe('ティール');
+    expect(folderColorSymbol('teal')).toBe('◆');
   });
 
   it('picks the first unused color for a new folder', () => {

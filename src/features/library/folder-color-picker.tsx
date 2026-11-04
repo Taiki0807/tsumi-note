@@ -3,6 +3,8 @@ import { Pressable, Text, View } from 'react-native';
 import { Icon } from '@/components/icons';
 import {
   FOLDER_PALETTE,
+  folderColorLabel,
+  folderColorSymbol,
   fontFamily,
   folderTone,
   typography,
@@ -29,7 +31,10 @@ export function FolderColorPicker({ value, onChange }: Props) {
       <Text style={{ fontFamily: fontFamily.extraBold, ...typography.label, color: colors.textPrimary }}>
         フォルダーの色
       </Text>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 10 }}>
+      <View
+        accessibilityRole="radiogroup"
+        style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 10 }}
+      >
         {FOLDER_PALETTE.map((entry) => {
           const selected = entry.key === value;
           const tone = folderTone(entry.key, colors, isDark);
@@ -40,7 +45,7 @@ export function FolderColorPicker({ value, onChange }: Props) {
               accessibilityLabel={entry.label}
               accessibilityState={{ selected }}
               onPress={() => onChange(entry.key)}
-              style={{ width: '20%', alignItems: 'center', gap: 4 }}
+              style={{ width: '20%', minHeight: 48, alignItems: 'center', gap: 4 }}
             >
               <View
                 style={{
@@ -91,6 +96,12 @@ export function FolderColorPicker({ value, onChange }: Props) {
           );
         })}
       </View>
+      <Text
+        accessibilityLiveRegion="polite"
+        style={{ fontFamily: fontFamily.bold, fontSize: 13, lineHeight: 18, color: colors.textSecondary }}
+      >
+        選択中: {folderColorSymbol(value)} {folderColorLabel(value)}
+      </Text>
     </View>
   );
 }
