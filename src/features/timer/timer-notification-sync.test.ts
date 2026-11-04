@@ -1,9 +1,15 @@
-import { createIdleState, pause, reset, resume, start, type TimerSettings, type TimerState } from './timer-logic';
+import {
+  createIdleState,
+  pause,
+  reset,
+  resume,
+  start,
+  type TimerSettings,
+  type TimerState,
+} from './timer-logic';
 import {
   createNotificationSynchronizer,
-  LONG_ALARM_DURATION_MS,
-  LONG_ALARM_REPEATS,
-  MAX_PENDING_TIMER_NOTIFICATIONS,
+  LONG_ALARM_SOUND_FILE,
   planAlarm,
   type NotificationBackend,
 } from './timer-notification-sync';
@@ -110,52 +116,44 @@ describe('alarm plan (アラーム音)', () => {
 
   it('短め: one sounding notification per boundary', () => {
     expect(planAlarm(boundaries, 'short')).toEqual([
-      { at: 100_000, event: 'focusEnd', boundaryAt: 100_000, repeat: 0, sound: true },
-      { at: 400_000, event: 'allDone', boundaryAt: 400_000, repeat: 0, sound: true },
+      { at: 100_000, event: 'focusEnd', sound: 'default' },
+      { at: 400_000, event: 'allDone', sound: 'default' },
     ]);
   });
 
   it('無音: one silent notification per boundary', () => {
-    expect(planAlarm(boundaries, 'silent').map(({ sound, repeat }) => [sound, repeat])).toEqual([
-      [false, 0],
-      [false, 0],
+    expect(planAlarm(boundaries, 'silent').map(({ sound }) => sound)).toEqual([false, false]);
+  });
+
+  it('長め: exactly one notification per boundary, with the bundled alarm file', () => {
+    const plan = planAlarm(boundaries, 'long');
+    expect(plan).toEqual([
+      { at: 100_000, event: 'focusEnd', sound: 'timer-alarm.wav' },
+      { at: 400_000, event: 'allDone', sound: 'timer-alarm.wav' },
     ]);
+    expect(LONG_ALARM_SOUND_FILE).toBe('timer-alarm.wav');
   });
 
-  it('長め: repeats the standard sound every 5 s for about 30 s', () => {
-    const plan = planAlarm(boundaries.slice(0, 1), 'long');
-    expect(plan).toHaveLength(LONG_ALARM_REPEATS);
-    expect(plan.map(({ at }) => at - 100_000)).toEqual([0, 5000, 10000, 15000, 20000, 25000]);
-    expect(plan.every(({ sound, boundaryAt }) => sound && boundaryAt === 100_000)).toBe(true);
-    expect(LONG_ALARM_DURATION_MS).toBe(30_000);
-  });
-
-  it('長め: never exceeds the pending-notification budget even for a 12-round timer', () => {
+  it('a 12-round timer schedules one notification per boundary', () => {
     const many = Array.from({ length: 23 }, (_, i) => ({ at: i * 600_000, event: 'focusEnd' as const }));
-    const plan = planAlarm(many, 'long');
-    expect(plan.length).toBeLessThanOrEqual(MAX_PENDING_TIMER_NOTIFICATIONS);
-    expect(plan.filter(({ repeat }) => repeat === 0)).toHaveLength(23);
+    expect(planAlarm(many, 'long')).toHaveLength(23);
   });
 
-  it('the synchronizer schedules the repeats for the configured mode and honours keepRingingAlarm', async () => {
-    const fired: { at: number; repeat: number; sound: boolean }[] = [];
-    const cancels: (number | undefined)[] = [];
+  it('the synchronizer schedules a single alarm notification for the configured mode', async () => {
+    const fired: { at: number; sound: unknown }[] = [];
     const backend: NotificationBackend = {
-      cancelAll: async (keep) => {
-        cancels.push(keep);
-      },
+      cancelAll: async () => undefined,
       hasPermission: async () => true,
       getAlarmMode: () => 'long',
       schedule: async (at, _event, alarm) => {
-        fired.push({ at, repeat: alarm.repeat, sound: alarm.sound });
+        fired.push({ at, sound: alarm.sound });
       },
     };
     const { sync } = createNotificationSynchronizer(backend);
     const one = { ...settings, rounds: 1 };
     const s = start(createIdleState(one), one, T0, () => 'x');
     await sync(s, T0);
-    expect(fired).toHaveLength(LONG_ALARM_REPEATS);
-    await sync(s, T0 + 1, { keepRingingAlarm: true });
-    expect(cancels).toEqual([undefined, T0 + 1]);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.sound).toBe('timer-alarm.wav');
   });
 });

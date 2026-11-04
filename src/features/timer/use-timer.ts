@@ -55,40 +55,33 @@ export function useTimer() {
 
   /** Applies a new state: persists it, keeps notifications in sync and saves finished focuses. */
   const commit = useCallback(
-    (next: TimerState, at: number, keepRingingAlarm = false) => {
+    (next: TimerState, at: number) => {
       stateRef.current = next;
       setState(next);
       setNow(at);
       storage.saveState(next);
-      void syncTimerNotifications(next, at, { keepRingingAlarm });
+      void syncTimerNotifications(next, at);
     },
     [storage],
   );
 
-  /**
-   * Recomputes from the wall clock; used by the ticker, foreground return and relaunch.
-   * `stopAlarm`: the user just came back to the app, so a 長め alarm still queued is cancelled; the ticker
-   * leaves it ringing instead (otherwise crossing a boundary in the foreground would cut it after one sound).
-   */
-  const sync = useCallback(
-    (stopAlarm = false) => {
-      const at = Date.now();
-      const result = advance(stateRef.current, at);
-      if (result.completedFocus.length > 0) {
-        storage.recordCompletedFocus(result.completedFocus);
-        setSavedCount((c) => c + 1);
-      }
-      const last = result.events[result.events.length - 1];
-      if (last) notifyHaptic(last);
-      if (result.state !== stateRef.current) commit(result.state, at, !stopAlarm && last !== undefined);
-      else setNow(at);
-    },
-    [commit, storage],
-  );
+  /** Recomputes from the wall clock; used by the ticker, foreground return and relaunch. */
+  const sync = useCallback(() => {
+    const at = Date.now();
+    const result = advance(stateRef.current, at);
+    if (result.completedFocus.length > 0) {
+      storage.recordCompletedFocus(result.completedFocus);
+      setSavedCount((c) => c + 1);
+    }
+    const last = result.events[result.events.length - 1];
+    if (last) notifyHaptic(last);
+    if (result.state !== stateRef.current) commit(result.state, at);
+    else setNow(at);
+  }, [commit, storage]);
 
   // Relaunch while running / finished in the background: catch up once on mount.
   useEffect(() => {
-    sync(true);
+    sync();
   }, [sync]);
 
   // The interval only repaints; correctness comes from `targetEndAt - Date.now()`.
@@ -100,7 +93,7 @@ export function useTimer() {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (status) => {
-      if (status === 'active') sync(true);
+      if (status === 'active') sync();
     });
     return () => sub.remove();
   }, [sync]);

@@ -27,7 +27,7 @@ export const APP_SETTING_KEYS = {
 } as const;
 
 /**
- * タイマー終了時のアラーム音: 長め = iOS標準の通知音を約30秒繰り返す / 短め = 通知音を1回 / 無音。
+ * タイマー終了時のアラーム音: 長め = 同梱のアラーム音(約28秒)を1件の通知で鳴らす / 短め = 通知音を1回 / 無音。
  * 端末固有の設定なので同期しない（同期対象の `timer.*` キーは focusMinutes / breakMinutes / rounds のみ）。
  */
 export type TimerAlarmMode = 'long' | 'short' | 'silent';

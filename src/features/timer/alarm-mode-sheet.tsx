@@ -6,7 +6,7 @@ import { fontFamily, typography, useTheme } from '@/design';
 import { TIMER_ALARM_MODE_LABELS, TIMER_ALARM_MODES, type TimerAlarmMode } from '@/domain/app-settings';
 
 const DESCRIPTIONS: Record<TimerAlarmMode, string> = {
-  long: '通知音を約30秒間くり返します',
+  long: 'アラーム音を約30秒鳴らします',
   short: '通知音を1回鳴らします',
   silent: '音は鳴らしません（バイブレーションは別設定）',
 };
@@ -29,7 +29,12 @@ export function AlarmModeSheet({ visible, mode, onSelect, onClose }: Props) {
       <View style={{ gap: 4 }}>
         <Text
           accessibilityRole="header"
-          style={{ fontFamily: fontFamily.extraBold, ...typography.heading, lineHeight: 33, color: colors.textPrimary }}
+          style={{
+            fontFamily: fontFamily.extraBold,
+            ...typography.heading,
+            lineHeight: 33,
+            color: colors.textPrimary,
+          }}
         >
           アラーム音
         </Text>
@@ -77,11 +82,18 @@ export function AlarmModeSheet({ visible, mode, onSelect, onClose }: Props) {
               </View>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text
-                  style={{ fontFamily: fontFamily.extraBold, fontSize: 16, lineHeight: 24, color: colors.textPrimary }}
+                  style={{
+                    fontFamily: fontFamily.extraBold,
+                    fontSize: 16,
+                    lineHeight: 24,
+                    color: colors.textPrimary,
+                  }}
                 >
                   {TIMER_ALARM_MODE_LABELS[option]}
                 </Text>
-                <Text style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}>
+                <Text
+                  style={{ fontFamily: fontFamily.bold, ...typography.caption, color: colors.textSecondary }}
+                >
                   {DESCRIPTIONS[option]}
                 </Text>
               </View>
