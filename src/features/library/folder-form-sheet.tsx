@@ -5,12 +5,16 @@ import { BottomSheet, Button, TextField } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { useRepositories } from '@/db/database-provider';
 import {
+  folderColorLabel,
+  folderTone,
   fontFamily,
   nextFolderColorKey,
+  normalizeHexColor,
   radius,
   resolveFolderColorKey,
   typography,
   useTheme,
+  useThemeName,
   type FolderColorValue,
 } from '@/design';
 import { isBlank, ValidationError } from '@/domain/validation';
@@ -38,6 +42,65 @@ export function FolderFormSheet({ visible, ...rest }: Props) {
     <BottomSheet visible={visible} onClose={rest.onClose}>
       {visible && <FolderForm {...rest} />}
     </BottomSheet>
+  );
+}
+
+/** Figma 12 › Preview: the folder as it will look (tile in the chosen color, name, 「色名 · 0問」). */
+function FolderPreview({ name, color }: { name: string; color: FolderColorValue }) {
+  const colors = useTheme();
+  const isDark = useThemeName() === 'dark';
+  const tone = folderTone(color, colors, isDark);
+  const custom = normalizeHexColor(color) !== null;
+  return (
+    <View
+      accessibilityLabel={`プレビュー ${name.trim() || 'フォルダー名'}、${folderColorLabel(color)}`}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 14,
+        padding: 14,
+        borderRadius: 20,
+        borderWidth: 1.5,
+        borderColor: `${tone.icon}40`,
+        backgroundColor: `${tone.icon}14`,
+      }}
+    >
+      <View
+        style={{
+          width: 52,
+          height: 52,
+          borderRadius: radius.lg,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: tone.icon,
+        }}
+      >
+        <Icon name="folder" size={26} color="#ffffff" strokeWidth={2.2} />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily: fontFamily.extraBold,
+            fontSize: 18,
+            lineHeight: 27,
+            color: name.trim() ? colors.textPrimary : colors.textSecondary,
+          }}
+        >
+          {name.trim() || 'フォルダー名'}
+        </Text>
+        <Text
+          style={{
+            fontFamily: fontFamily.bold,
+            fontSize: 12,
+            lineHeight: 18,
+            color: custom ? tone.label : tone.icon,
+          }}
+        >
+          {folderColorLabel(color)} · 0問
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -103,6 +166,7 @@ function FolderForm({
           </Text>
         </View>
       </View>
+      <FolderPreview name={name} color={color} />
       <View style={{ gap: 6 }}>
         <TextField
           label="フォルダー名"
