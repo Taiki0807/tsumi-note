@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react-native';
 
-import { FolderColorPicker, HOLE, RAINBOW_STOPS, rainbowColorAt } from './folder-color-picker';
+import { FolderColorPicker, HOLE, PLUS_SIZE, PLUS_STROKE, RAINBOW_STOPS, rainbowColorAt } from './folder-color-picker';
 
 jest.mock('@expo/ui/swift-ui', () => {
   const { View } = jest.requireActual('react-native');
@@ -31,6 +31,8 @@ describe('FolderColorPicker 「その他の色」', () => {
   it('unselected: shows the rainbow circle, not selected', async () => {
     await render(<FolderColorPicker value="primary" onChange={() => undefined} />);
     expect(screen.getByTestId('rainbow-circle')).toBeTruthy();
+    expect(screen.getByTestId('rainbow-plus')).toBeTruthy();
+    expect([PLUS_SIZE, PLUS_STROKE]).toEqual([16, 1.6]);
     const cell = screen.getByRole('radio', { name: 'その他の色（カスタム）' });
     expect(cell.props.accessibilityState).toEqual({ selected: false });
     expect(cell.props.accessibilityHint).toBe('タップするとカラーピッカーが開きます');
@@ -39,6 +41,7 @@ describe('FolderColorPicker 「その他の色」', () => {
   it('selected (custom color): no rainbow, selected state', async () => {
     await render(<FolderColorPicker value="#112233" onChange={() => undefined} />);
     expect(screen.queryByTestId('rainbow-circle')).toBeNull();
+    expect(screen.queryByTestId('rainbow-plus')).toBeNull();
     const cell = screen.getByRole('radio', { name: 'その他の色（カスタム）' });
     expect(cell.props.accessibilityState).toEqual({ selected: true });
   });

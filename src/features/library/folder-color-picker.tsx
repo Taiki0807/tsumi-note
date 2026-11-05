@@ -2,6 +2,7 @@ import { ColorPicker, Host } from '@expo/ui/swift-ui';
 import { Platform, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { Icon } from '@/components/icons';
 import {
   CUSTOM_COLOR_LABEL,
   FOLDER_PALETTE,
@@ -38,6 +39,9 @@ export const RAINBOW_STOPS: readonly { position: number; color: string }[] = [
   { position: 1, color: '#FF4D4D' },
 ];
 export const HOLE = 26;
+/** Figma 423:1229 Icon/plus: 16pt box, 1.6pt stroke, centered in the 50pt cell (offset 0). Shown only while unselected. */
+export const PLUS_SIZE = 16;
+export const PLUS_STROKE = 1.6;
 const RAINBOW_SEGMENTS = 120;
 
 function lerpHex(a: string, b: string, t: number): string {
@@ -165,6 +169,10 @@ function CustomColorCell({ value, onChange }: Props) {
       ) : (
         <View style={{ width: CELL, height: CELL, alignItems: 'center', justifyContent: 'center' }}>
           <RainbowCircle holeColor={colors.surface} />
+          {/* Figma 423:1229 Icon/plus: 16pt box centered in the cell, 1.6pt round stroke (= 2.4 in the 24 viewBox), variable 190:46 (textPrimary). */}
+          <View style={{ position: 'absolute' }} testID="rainbow-plus">
+            <Icon name="plus" size={PLUS_SIZE} color={colors.textPrimary} strokeWidth={PLUS_STROKE * (24 / PLUS_SIZE)} />
+          </View>
         </View>
       )}
       <View style={{ position: 'absolute', width: CELL, height: CELL, opacity: 0.02 }}>
