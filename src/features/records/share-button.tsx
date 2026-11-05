@@ -14,10 +14,13 @@ export function ShareButton({
   accessibilityLabel,
   disabled,
   capture,
+  message,
 }: {
   accessibilityLabel: string;
   disabled: boolean;
   capture: () => Promise<string>;
+  /** Share text (with hashtags) passed along with the image; none = image only. */
+  message?: string;
 }) {
   const colors = useTheme();
   const [busy, setBusy] = useState(false);
@@ -30,7 +33,7 @@ export function ShareButton({
     running.current = true;
     setBusy(true);
     try {
-      if ((await shareRecordImage(capture)) === 'failed') {
+      if ((await shareRecordImage(capture, undefined, message)) === 'failed') {
         Alert.alert('共有できませんでした', 'もう一度お試しください。');
       }
     } finally {

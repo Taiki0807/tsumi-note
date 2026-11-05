@@ -14,6 +14,7 @@ import { startOfLocalDay } from './records-logic';
 import { ShareButton } from './share-button';
 import { DayShareImageView } from './share-image-view';
 import { buildDayShareModel } from './share-model';
+import { buildDayShareText } from './share-text';
 import { useDayRecord } from './use-day-record';
 
 const CARD = 24;
@@ -48,6 +49,8 @@ export function DayRecordScreen() {
     [view, dayStart],
   );
 
+  const shareMessage = useMemo(() => (shareModel ? buildDayShareText(shareModel) : undefined), [shareModel]);
+
   return (
     <SettingsScaffold
       title={`${formatMonthDay(dayStart)}の記録`}
@@ -57,6 +60,7 @@ export function DayRecordScreen() {
           accessibilityLabel="この日の記録を画像で共有"
           disabled={!shareModel}
           capture={() => captureShareImage(shareRef)}
+          message={shareMessage}
         />
       }
       overlay={shareModel && <DayShareImageView ref={shareRef} model={shareModel} colorFor={colorFor} />}

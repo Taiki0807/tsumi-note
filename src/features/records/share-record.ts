@@ -8,11 +8,12 @@ export type ShareRecordResult = 'shared' | 'dismissed' | 'failed';
  */
 export async function shareRecordImage(
   capture: () => Promise<string>,
-  share: (content: { url: string }) => Promise<{ action: string }> = (c) => Share.share(c),
+  share: (content: { url: string; message?: string }) => Promise<{ action: string }> = (c) => Share.share(c),
+  message?: string,
 ): Promise<ShareRecordResult> {
   try {
     const url = await capture();
-    const result = await share({ url });
+    const result = await share(message ? { url, message } : { url });
     return result.action === Share.dismissedAction ? 'dismissed' : 'shared';
   } catch {
     return 'failed';

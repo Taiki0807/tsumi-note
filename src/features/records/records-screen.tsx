@@ -24,6 +24,7 @@ import {
 import { ShareButton } from './share-button';
 import { ShareImageView } from './share-image-view';
 import { buildShareModel } from './share-model';
+import { buildWeekShareText } from './share-text';
 import { useWeeklyRecord } from './use-weekly-record';
 
 /** Figma 02 学習記録 › Weekly chart: 150pt frame, baseline 120pt below the top gridline. */
@@ -257,6 +258,16 @@ export function RecordsScreen() {
     () => (view ? buildShareModel({ record: view.record, folders: view.folders, folderId }) : null),
     [view, folderId],
   );
+  const shareMessage = useMemo(
+    () =>
+      shareModel
+        ? buildWeekShareText(shareModel, {
+            isCurrentWeek,
+            folderName: folderId === undefined ? undefined : shareModel.scopeLabel,
+          })
+        : undefined,
+    [shareModel, isCurrentWeek, folderId],
+  );
   const selectedFolderName = folders.find((f) => f.id === folderId)?.name ?? 'すべて';
 
   const numeric = {
@@ -306,6 +317,7 @@ export function RecordsScreen() {
           accessibilityLabel="グラフを画像で共有"
           disabled={!shareModel}
           capture={() => captureShareImage(shareRef)}
+          message={shareMessage}
         />
         {/* Figma 02 › IconButton/記録を追加: 44pt primary-soft circle with a 22pt plus → 記録を追加 (02c). */}
         <Pressable

@@ -30,6 +30,18 @@ describe('ShareButton', () => {
     expect(share).toHaveBeenCalledWith({ url: 'file:///tmp/day.png' });
   });
 
+  it('passes the message to the share sheet together with the image', async () => {
+    const share = jest
+      .spyOn(Share, 'share')
+      .mockResolvedValue({ action: Share.sharedAction, activityType: undefined });
+    const capture = jest.fn().mockResolvedValue('file:///tmp/day.png');
+    await render(
+      <ShareButton accessibilityLabel="共有する" disabled={false} capture={capture} message="本文 #つみノート" />,
+    );
+    await fireEvent.press(screen.getByRole('button', { name: '共有する' }));
+    expect(share).toHaveBeenCalledWith({ url: 'file:///tmp/day.png', message: '本文 #つみノート' });
+  });
+
   it('ignores taps while an image is being generated', async () => {
     jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction, activityType: undefined });
     const d = deferred<string>();

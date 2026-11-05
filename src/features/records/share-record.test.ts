@@ -10,6 +10,15 @@ describe('shareRecordImage', () => {
     expect(share).toHaveBeenCalledWith({ url: 'file:///tmp/a.png' });
   });
 
+  it('passes the message along with the url; no message = image only', async () => {
+    const share = jest.fn().mockResolvedValue({ action: Share.sharedAction });
+    await shareRecordImage(async () => 'file:///a.png', share, '今週 #つみノート');
+    expect(share).toHaveBeenCalledWith({ url: 'file:///a.png', message: '今週 #つみノート' });
+    share.mockClear();
+    await shareRecordImage(async () => 'file:///a.png', share);
+    expect(share).toHaveBeenCalledWith({ url: 'file:///a.png' });
+  });
+
   it('reports dismissal', async () => {
     const share = jest.fn().mockResolvedValue({ action: Share.dismissedAction });
     await expect(shareRecordImage(async () => 'file:///a.png', share)).resolves.toBe('dismissed');
