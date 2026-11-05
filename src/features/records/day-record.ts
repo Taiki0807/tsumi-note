@@ -18,13 +18,13 @@ export type DayRecordView = {
   sessions: DaySession[];
   /** Time per folder, in the order of the folder list (未分類 last). */
   shares: FolderShare[];
-  folders: { id: string; name: string }[];
+  folders: { id: string; name: string; color?: string | null }[];
 };
 
 /** Pure: groups one day's sessions (Figma 02b 日別の記録). */
 export function buildDayRecord(
   sessions: DaySession[],
-  folders: { id: string; name: string }[],
+  folders: { id: string; name: string; color?: string | null }[],
 ): Omit<DayRecordView, 'folders'> {
   const sorted = [...sessions].sort((a, b) => a.startedAt - b.startedAt);
   const byFolder = new Map<string | null, number>();
@@ -47,7 +47,7 @@ export function loadDayRecord(
   { studySessions, folders }: Pick<Repositories, 'studySessions' | 'folders'>,
   dayStart: number,
 ): DayRecordView {
-  const folderList = folders.list().map(({ id, name }) => ({ id, name }));
+  const folderList = folders.list().map(({ id, name, color }) => ({ id, name, color }));
   const sessions = studySessions.listBetween(dayStart, addDays(dayStart, 1));
   return { ...buildDayRecord(sessions, folderList), folders: folderList };
 }

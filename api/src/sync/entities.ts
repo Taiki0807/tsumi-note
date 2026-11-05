@@ -13,6 +13,12 @@ export type FieldSpec = {
   max?: number;
   /** text の許容値 */
   values?: readonly string[];
+  /**
+   * 後から追加した列。この列を知らない旧バージョンのアプリ(および旧形式で保存済みのレコード)は
+   * キー自体を持たないので、欠落を許容して補う。`from` があればその列の値、なければ null。
+   * (旧版端末には、この列の編集は反映されない)
+   */
+  legacy?: { from?: string };
 };
 
 /**
@@ -33,6 +39,11 @@ export type EntitySpec = {
   /** 競合時に上書きされる側の内容を「競合コピー」として残す(本文を持つエンティティ)。field は接頭辞を付ける列 */
   conflictCopy?: { field: string };
   fields: readonly FieldSpec[];
+  /**
+   * 追記専用だった頃の旧バージョンが送ってくる(= legacy 列を持たない)レコードは、サーバーに既にあれば
+   * 変更せず無視する。旧版が過去の記録を再送しても、新版で編集した内容を巻き戻さない。
+   */
+  legacyAppend?: boolean;
 };
 
 const ts = (name: string, nullable = false): FieldSpec => ({ name, type: 'int', nullable });
@@ -47,7 +58,12 @@ export const ENTITIES: readonly EntitySpec[] = [
     idColumn: 'id',
     kind: 'mutable',
     rank: 0,
-    fields: [{ name: 'name', type: 'text', max: 200 }, ...mutableTimes],
+    fields: [
+      { name: 'name', type: 'text', max: 200 },
+      // 色のパレットキー。旧版は持たない(null = 作成順の既定色)
+      { name: 'color', type: 'text', nullable: true, max: 32, legacy: {} },
+      ...mutableTimes,
+    ],
   },
   {
     name: 'settings',
@@ -106,14 +122,18 @@ export const ENTITIES: readonly EntitySpec[] = [
     name: 'study_sessions',
     table: 'study_sessions',
     idColumn: 'id',
-    kind: 'append',
+    // 学習記録は編集できる(旧: 追記専用)。削除は deleted_at の墓標
+    kind: 'mutable',
     rank: 1,
+    legacyAppend: true,
     fields: [
       { name: 'folder_id', type: 'text', nullable: true, max: 128 },
       ts('started_at'),
       ts('ended_at'),
       ts('duration_seconds'),
       ts('created_at'),
+      { name: 'updated_at', type: 'int', legacy: { from: 'created_at' } },
+      { name: 'deleted_at', type: 'int', nullable: true, legacy: {} },
     ],
   },
   {
@@ -171,6 +191,22 @@ export const ENTITIES: readonly EntitySpec[] = [
     ],
   },
 ];
+
+/** data に無い legacy 列を補う(補った列名を返す)。他の列は検証しない */
+export function fillLegacy(
+  spec: EntitySpec,
+  data: Record<string, unknown>,
+): { data: Record<string, unknown>; filled: string[] } {
+  const out = { ...data };
+  const filled: string[] = [];
+  for (const f of spec.fields) {
+    if (!f.legacy || f.name in out) continue;
+    const from = f.legacy.from;
+    out[f.name] = from !== undefined && from in out ? out[from] : null;
+    filled.push(f.name);
+  }
+  return { data: out, filled };
+}
 
 export const ENTITY_BY_NAME: ReadonlyMap<string, EntitySpec> = new Map(ENTITIES.map((e) => [e.name, e]));
 

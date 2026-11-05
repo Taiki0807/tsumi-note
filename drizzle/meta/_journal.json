@@ -43,6 +43,13 @@
       "when": 1791665267532,
       "tag": "0005_image_transfers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793804747847,
+      "tag": "0006_study_session_edit_folder_color",
+      "breakpoints": true
     }
   ]
 }

@@ -8,7 +8,7 @@ import { useFolderTone } from '@/features/notes/folder-tone';
 
 type Props = {
   visible: boolean;
-  folders: { id: string; name: string }[];
+  folders: { id: string; name: string; color?: string | null }[];
   selectedId: string | null;
   onSelect: (folderId: string | null) => void;
   onClose: () => void;
@@ -25,11 +25,14 @@ type Props = {
 function FolderRow({
   name,
   index,
+  color,
   selected,
   first,
   onPress,
 }: {
   name: string;
+  /** Saved palette key (`folders.color`); null = legacy order-based color. */
+  color?: string | null;
   /** Position among the folders; -1 = 未分類. */
   index: number;
   selected: boolean;
@@ -37,7 +40,7 @@ function FolderRow({
   onPress: () => void;
 }) {
   const colors = useTheme();
-  const tone = useFolderTone(index);
+  const tone = useFolderTone(index, color);
   return (
     <Pressable
       accessibilityRole="button"
@@ -111,7 +114,10 @@ export function FolderPickerSheet({
 }: Props) {
   const colors = useTheme();
   const createPending = useRef(false);
-  const options = [{ id: null as string | null, name: '未分類' }, ...folders];
+  const options: { id: string | null; name: string; color?: string | null }[] = [
+    { id: null, name: '未分類' },
+    ...folders,
+  ];
 
   return (
     <BottomSheet
@@ -147,6 +153,7 @@ export function FolderPickerSheet({
           <FolderRow
             key={option.id ?? 'none'}
             name={option.name}
+            color={option.color}
             index={option.id === null ? -1 : folders.findIndex((f) => f.id === option.id)}
             selected={option.id === selectedId}
             first={i === 0}

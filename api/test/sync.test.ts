@@ -408,3 +408,128 @@ describe('設定', () => {
     );
   });
 });
+
+describe('学習記録の編集と旧バージョンとの互換性', () => {
+  const session = (over: Record<string, unknown> = {}) => ({
+    folder_id: null,
+    started_at: 1000,
+    ended_at: 61_000,
+    duration_seconds: 60,
+    created_at: 1000,
+    updated_at: 1000,
+    deleted_at: null,
+    ...over,
+  });
+  // 旧バージョンのアプリは updated_at / deleted_at を送らない
+  const legacySession = (over: Record<string, unknown> = {}) => {
+    const { updated_at: _u, deleted_at: _d, ...rest } = session(over);
+    return rest;
+  };
+  const sessions = async (h: H, cookie: string) =>
+    (await pull(h, cookie)).body.changes.filter((c: any) => c.entity === 'study_sessions');
+
+  test('編集(最新版を見た上での更新)は採用される', async () => {
+    const { h, a } = await setup();
+    const first = await push(h, a, [change('study_sessions', 's1', session())]);
+    const seq = first.body.results[0].serverSeq;
+    const edited = await push(h, a, [
+      change(
+        'study_sessions',
+        's1',
+        session({ ended_at: 121_000, duration_seconds: 120, updated_at: 2000 }),
+        seq,
+      ),
+    ]);
+    expect(edited.body.results[0].status).toBe('applied');
+    const [rec] = await sessions(h, a);
+    expect(rec.data).toMatchObject({ duration_seconds: 120, updated_at: 2000 });
+  });
+
+  test('削除(墓標)も同期される', async () => {
+    const { h, a } = await setup();
+    const first = await push(h, a, [change('study_sessions', 's1', session())]);
+    await push(h, a, [
+      change(
+        'study_sessions',
+        's1',
+        session({ deleted_at: 3000, updated_at: 3000 }),
+        first.body.results[0].serverSeq,
+      ),
+    ]);
+    expect((await sessions(h, a))[0].data.deleted_at).toBe(3000);
+  });
+
+  test('旧バージョンの新規記録(列なし)は受け付け、updated_at は created_at で補う', async () => {
+    const { h, a } = await setup();
+    const r = await push(h, a, [change('study_sessions', 'old1', legacySession({ created_at: 777 }))]);
+    expect(r.status).toBe(200);
+    expect((await sessions(h, a))[0].data).toMatchObject({
+      created_at: 777,
+      updated_at: 777,
+      deleted_at: null,
+    });
+  });
+
+  test('旧バージョンが過去の記録を再送しても、新版での編集を巻き戻さない', async () => {
+    const { h, a } = await setup();
+    const first = await push(h, a, [change('study_sessions', 's1', session())]);
+    await push(h, a, [
+      change(
+        'study_sessions',
+        's1',
+        session({ duration_seconds: 300, updated_at: 5000 }),
+        first.body.results[0].serverSeq,
+      ),
+    ]);
+    const resend = await push(h, a, [change('study_sessions', 's1', legacySession())]);
+    expect(resend.body.results[0].status).toBe('noop');
+    expect((await sessions(h, a))[0].data.duration_seconds).toBe(300);
+  });
+
+  test('旧形式で保存済みのレコードと同じ内容の新形式の送信は変更なし', async () => {
+    const { h, a } = await setup();
+    await push(h, a, [change('study_sessions', 's1', legacySession())]);
+    const same = await push(h, a, [change('study_sessions', 's1', session())]);
+    expect(same.body.results[0].status).toBe('noop');
+  });
+
+  test('フォルダー: 旧バージョン(color なし)の改名で、保存済みの色を消さない', async () => {
+    const { h, a } = await setup();
+    const folder = (over: Record<string, unknown> = {}) => ({
+      name: 'F',
+      color: 'rose',
+      created_at: 1,
+      updated_at: 1,
+      deleted_at: null,
+      ...over,
+    });
+    const first = await push(h, a, [change('folders', 'f1', folder())]);
+    const { color: _c, ...legacy } = folder({ name: 'F改', updated_at: 2 });
+    const r = await push(h, a, [change('folders', 'f1', legacy, first.body.results[0].serverSeq)]);
+    expect(r.body.results[0].status).toBe('applied');
+    const rec = (await pull(h, a)).body.changes.find((c: any) => c.entity === 'folders');
+    expect(rec.data).toMatchObject({ name: 'F改', color: 'rose' });
+  });
+
+  test('フォルダー: カスタム色(#RRGGBB)がそのまま往復する', async () => {
+    const { h, a } = await setup();
+    const data = { name: 'F', color: '#1A2B3C', created_at: 1, updated_at: 1, deleted_at: null };
+    expect((await push(h, a, [change('folders', 'f1', data)])).status).toBe(200);
+    const rec = (await pull(h, a)).body.changes.find((c: any) => c.entity === 'folders');
+    expect(rec.data.color).toBe('#1A2B3C');
+  });
+
+  test('フォルダー: 旧バージョンの新規作成は color = null で保存される', async () => {
+    const { h, a } = await setup();
+    const legacy = { name: 'F', created_at: 1, updated_at: 1, deleted_at: null };
+    expect((await push(h, a, [change('folders', 'f1', legacy)])).status).toBe(200);
+    const rec = (await pull(h, a)).body.changes.find((c: any) => c.entity === 'folders');
+    expect(rec.data.color).toBeNull();
+  });
+
+  test('legacy 列でない欠落は従来どおり拒否する', async () => {
+    const { h, a } = await setup();
+    const { started_at: _s, ...missing } = session();
+    expect((await push(h, a, [change('study_sessions', 's9', missing)])).status).toBe(400);
+  });
+});

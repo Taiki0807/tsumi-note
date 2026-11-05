@@ -39,6 +39,37 @@ export function buildManualSession(input: ManualSessionInput, now: number): Manu
   return { ok: true, startedAt, endedAt, durationSeconds };
 }
 
+/**
+ * Validates the edit form of an existing record (same rules as 「記録を追加」). The 学習時間 always matches
+ * 開始〜終了, with one exception: when the day and both times are left as they were, the stored duration
+ * is kept (a timer session with pauses is shorter than its range, and changing only the folder must not
+ * rewrite it).
+ */
+export function buildEditedSession(
+  input: ManualSessionInput,
+  now: number,
+  original: { startedAt: number; endedAt: number; durationSeconds: number },
+): ManualSessionResult {
+  const unchanged =
+    startOfDay(original.startedAt) === input.dayStart &&
+    input.start === formatClock(original.startedAt) &&
+    input.end === formatClock(original.endedAt);
+  if (unchanged) {
+    return {
+      ok: true,
+      startedAt: original.startedAt,
+      endedAt: original.endedAt,
+      durationSeconds: original.durationSeconds,
+    };
+  }
+  return buildManualSession(input, now);
+}
+
+function startOfDay(at: number): number {
+  const d = new Date(at);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
 /** Selectable days of the form: today and the previous 6 days (local midnights, newest first). */
 export function recentDays(todayStart: number, count = 7): number[] {
   return Array.from({ length: count }, (_, i) => addDays(todayStart, -i));

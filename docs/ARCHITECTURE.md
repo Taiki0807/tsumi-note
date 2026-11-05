@@ -199,13 +199,23 @@ v1では必要に応じてLast Write Winsを利用できる。
 
 例：
 
-- Study Session
 - Answer History
 - Review History
 
 履歴データは基本的に追記型とする。
 
 過去履歴を更新して失わない。
+
+### 例外：Study Session（学習記録）
+
+Study Session は、利用者が後から日付・時刻・フォルダーを訂正できる **Mutable Entity**（`id` / `createdAt` / `updatedAt` / `deletedAt`）として扱う（マイグレーション `0006`、Issue #33）。
+
+- 編集は同じ `id` の行を上書きし、`updatedAt` を更新する。削除は `deletedAt` のTombstone。
+- 読み取りは `deletedAt IS NULL` のみ。
+- 同期は `mutable`：最新版を見た上での編集は採用、同時編集は後着を採用する（競合コピーは作らない）。削除と編集が衝突した場合は削除を採用する。
+- 既存行は `updated_at = created_at`、`deleted_at = NULL` でバックフィルし、UPDATEの変更検知トリガー（`sync_capture_study_sessions_upd`）を追加する。
+- **旧バージョンとの互換性**：旧版アプリは `updated_at` / `deleted_at` を送らない。サーバーは欠落を許容して補う（`FieldSpec.legacy`）。旧版が送った記録が既にサーバーにある場合は無視し、新版での編集・削除を巻き戻さない（`EntitySpec.legacyAppend`）。旧版端末は、新しい列を知らないため **編集内容は反映されない**（取得時は元の値のまま。削除済みの記録も旧版では表示され続ける）。アプリの更新で解消する。
+- 外部連携API（`/v1/external/...`）で登録する記録も `updated_at` / `deleted_at` を持つ。読み取りは削除済みを除く。
 
 ---
 

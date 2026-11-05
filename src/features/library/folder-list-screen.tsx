@@ -7,26 +7,22 @@ import { AppIcon } from '@/components/app-icon';
 import { Button, EmptyState, SearchField } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
+import { useFolderTone } from '@/features/notes/folder-tone';
 import { Chip } from '@/features/review/review-ui';
 
 import { FolderFormSheet } from './folder-form-sheet';
 import type { FolderSummary } from './library-use-cases';
 import { useFolderList } from './use-library';
 
-/** Folder tile colors cycle through the three Figma variants (primary / warning / info). */
-function useTileColors(index: number) {
-  const c = useTheme();
-  const tiles = [
-    { bg: c.primarySoft, fg: c.primary },
-    { bg: c.warningSoft, fg: c.warning },
-    { bg: c.infoSoft, fg: c.info },
-  ] as const;
-  return tiles[index % 3] ?? tiles[0];
+/** Folder tile colors: the folder's saved palette color (legacy rows: the primary / warning / info cycle). */
+function useTileColors(index: number, color: string | null) {
+  const tone = useFolderTone(index, color);
+  return { bg: tone.tile, fg: tone.icon };
 }
 
 function FolderCard({ folder, index }: { folder: FolderSummary; index: number }) {
   const colors = useTheme();
-  const tile = useTileColors(index);
+  const tile = useTileColors(index, folder.color);
   return (
     <Pressable
       accessibilityRole="button"
@@ -174,7 +170,7 @@ export function FolderListScreen({ header }: { header?: ReactNode } = {}) {
       </ScrollView>
       <FolderFormSheet
         visible={creating}
-        onSubmit={(name) => createFolder(name)}
+        onSubmit={(name, color) => createFolder(name, color)}
         onClose={() => setCreating(false)}
       />
     </View>

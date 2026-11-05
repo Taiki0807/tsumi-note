@@ -23,8 +23,8 @@ type TimerRepos = Pick<Repositories, 'settings' | 'studySessions' | 'folders'>;
 export function createTimerStorage({ settings, studySessions, folders }: TimerRepos) {
   return {
     /** Live (not deleted) folders, the only candidates for the picker. */
-    listFolders(): { id: string; name: string }[] {
-      return folders.list().map(({ id, name }) => ({ id, name }));
+    listFolders(): { id: string; name: string; color: string | null }[] {
+      return folders.list().map(({ id, name, color }) => ({ id, name, color }));
     },
 
     /**

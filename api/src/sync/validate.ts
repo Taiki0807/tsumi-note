@@ -1,4 +1,11 @@
-import { ENTITY_BY_NAME, ID_PATTERN, SYNCED_SETTING_KEY, type EntitySpec, type FieldSpec } from './entities';
+import {
+  ENTITY_BY_NAME,
+  fillLegacy,
+  ID_PATTERN,
+  SYNCED_SETTING_KEY,
+  type EntitySpec,
+  type FieldSpec,
+} from './entities';
 
 export type Value = string | number | null;
 export type RecordData = Record<string, Value>;
@@ -16,6 +23,8 @@ export type Change = {
   /** クライアントが最後に見たサーバー側バージョン。未取得なら null */
   baseSeq: number | null;
   data: RecordData;
+  /** 旧バージョンのアプリが送らない列を補った場合の列名(旧形式の送信) */
+  filled?: string[];
 };
 
 export class ValidationError extends Error {}
@@ -50,15 +59,27 @@ function checkField(f: FieldSpec, raw: unknown): Value {
 
 /** 本文の `data` をエンティティ定義で厳密に検証する(未知のキー・欠落・型違いは拒否) */
 export function validateData(spec: EntitySpec, raw: unknown): RecordData {
+  return validateDataWithLegacy(spec, raw).data;
+}
+
+/**
+ * validateData と同じ検証に加え、旧バージョンのアプリが送らない列(`legacy`)の欠落を許容して補う。
+ * `filled` は補った列名(= 旧形式の送信)。
+ */
+export function validateDataWithLegacy(
+  spec: EntitySpec,
+  raw: unknown,
+): { data: RecordData; filled: string[] } {
   if (!isObject(raw)) throw new ValidationError('data が不正です');
   const allowed = new Set(spec.fields.map((f) => f.name));
   for (const key of Object.keys(raw)) if (!allowed.has(key)) throw new ValidationError(`未知のキー: ${key}`);
+  const { data: complete, filled } = fillLegacy(spec, raw);
   const out: RecordData = {};
   for (const f of spec.fields) {
-    if (!(f.name in raw)) throw new ValidationError(`${f.name} がありません`);
-    out[f.name] = checkField(f, raw[f.name]);
+    if (!(f.name in complete)) throw new ValidationError(`${f.name} がありません`);
+    out[f.name] = checkField(f, complete[f.name]);
   }
-  return out;
+  return { data: out, filled };
 }
 
 export function validateId(spec: EntitySpec, id: unknown): string {
@@ -88,7 +109,8 @@ export function parsePush(body: unknown): { changes: Change[] } {
     const key = `${spec.name}\u0000${id}`;
     if (seen.has(key)) throw new ValidationError('同じレコードが重複しています');
     seen.add(key);
-    changes.push({ spec, id, opId, baseSeq, data: validateData(spec, raw.data) });
+    const { data, filled } = validateDataWithLegacy(spec, raw.data);
+    changes.push({ spec, id, opId, baseSeq, data, ...(filled.length > 0 ? { filled } : {}) });
   }
   // 親(フォルダー等)が先にサーバーの採番順に入るようにする(安定ソート)
   changes.sort((a, b) => a.spec.rank - b.spec.rank);

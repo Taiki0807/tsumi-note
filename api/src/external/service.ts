@@ -372,6 +372,8 @@ export async function recordExternalSession(
         ended_at: input.endedAt,
         duration_seconds: input.durationSeconds,
         created_at: now,
+        updated_at: now,
+        deleted_at: null,
       },
     },
   ]);
@@ -446,7 +448,7 @@ async function resolveFolderByName(
         id: folderId,
         opId: `extf-op-${digest}-${folderId}`,
         baseSeq: null,
-        data: { name, created_at: now, updated_at: now, deleted_at: null },
+        data: { name, color: null, created_at: now, updated_at: now, deleted_at: null },
       },
     ]);
     return r?.status === 'applied';

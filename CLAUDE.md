@@ -232,7 +232,9 @@ SQLiteをローカルデータのPrimary Storeとして扱います。
 
 削除同期ではTombstoneを使用します。
 
-履歴系データはAppend-onlyを基本とします。
+履歴系データ（回答履歴・復習履歴）はAppend-onlyを基本とします。
+
+学習記録（Study Session）は、利用者が編集できるためMutable Entity（`updatedAt` / `deletedAt` あり）として扱います（Issue #33、`docs/ARCHITECTURE.md` §8）。旧バージョンとの同期互換性のため、後から追加した列は `src/sync/entities.ts` の `FieldSpec.legacy` で欠落を許容します（`api/src/sync/entities.ts` と同一内容に保つこと）。
 
 同期設計の詳細は `docs/ARCHITECTURE.md` に従ってください。
 

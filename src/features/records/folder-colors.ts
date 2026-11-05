@@ -1,14 +1,18 @@
-import { useTheme } from '@/design';
+import { folderTone, resolveFolderColorKey, useTheme, useThemeName } from '@/design';
 
 import { folderColorIndex } from './records-logic';
 
-/** Folder → chart color: the same primary → warning → info cycle as the folder list; 未分類 is success. */
-export function useFolderColors(folders: { id: string }[]) {
+/**
+ * Folder → chart color: the folder's saved palette color, else the legacy primary → warning → info cycle
+ * in folder-list order. 未分類 is success.
+ */
+export function useFolderColors(folders: { id: string; color?: string | null }[]) {
   const colors = useTheme();
+  const isDark = useThemeName() === 'dark';
   const order = folders.map((f) => f.id);
-  const palette = [colors.primary, colors.warning, colors.info];
   return (folderId: string | null) => {
     const index = folderColorIndex(order, folderId);
-    return index < 0 ? colors.success : (palette[index % palette.length] ?? colors.primary);
+    if (index < 0) return colors.success;
+    return folderTone(resolveFolderColorKey(folders[index]?.color, index), colors, isDark).icon;
   };
 }

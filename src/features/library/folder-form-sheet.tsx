@@ -3,14 +3,31 @@ import { Text, View } from 'react-native';
 
 import { BottomSheet, Button, TextField } from '@/components/form-ui';
 import { Icon } from '@/components/icons';
-import { fontFamily, radius, typography, useTheme } from '@/design';
+import { useRepositories } from '@/db/database-provider';
+import {
+  folderColorLabel,
+  folderTone,
+  fontFamily,
+  nextFolderColorKey,
+  normalizeHexColor,
+  radius,
+  resolveFolderColorKey,
+  typography,
+  useTheme,
+  useThemeName,
+  type FolderColorValue,
+} from '@/design';
 import { isBlank, ValidationError } from '@/domain/validation';
+
+import { FolderColorPicker } from './folder-color-picker';
 
 type Props = {
   visible: boolean;
   /** `undefined` = create a new folder; otherwise rename this one. */
   initialName?: string;
-  onSubmit: (name: string) => void;
+  /** Saved palette key of the folder being edited (create mode: the first palette color is preselected). */
+  initialColor?: string | null;
+  onSubmit: (name: string, color: FolderColorValue) => void;
   onClose: () => void;
   /** Hint under the title (create mode). Figma 01c (from the timer) words it differently from 12. */
   subtitle?: string;
@@ -28,8 +45,68 @@ export function FolderFormSheet({ visible, ...rest }: Props) {
   );
 }
 
+/** Figma 12 › Preview: the folder as it will look (tile in the chosen color, name, 「色名 · 0問」). */
+function FolderPreview({ name, color }: { name: string; color: FolderColorValue }) {
+  const colors = useTheme();
+  const isDark = useThemeName() === 'dark';
+  const tone = folderTone(color, colors, isDark);
+  const custom = normalizeHexColor(color) !== null;
+  return (
+    <View
+      accessibilityLabel={`プレビュー ${name.trim() || 'フォルダー名'}、${folderColorLabel(color)}`}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 14,
+        padding: 14,
+        borderRadius: 20,
+        borderWidth: 1.5,
+        borderColor: `${tone.icon}40`,
+        backgroundColor: `${tone.icon}14`,
+      }}
+    >
+      <View
+        style={{
+          width: 52,
+          height: 52,
+          borderRadius: radius.lg,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: tone.icon,
+        }}
+      >
+        <Icon name="folder" size={26} color="#ffffff" strokeWidth={2.2} />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily: fontFamily.extraBold,
+            fontSize: 18,
+            lineHeight: 27,
+            color: name.trim() ? colors.textPrimary : colors.textSecondary,
+          }}
+        >
+          {name.trim() || 'フォルダー名'}
+        </Text>
+        <Text
+          style={{
+            fontFamily: fontFamily.bold,
+            fontSize: 12,
+            lineHeight: 18,
+            color: custom ? tone.label : tone.icon,
+          }}
+        >
+          {folderColorLabel(color)} · 0問
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function FolderForm({
   initialName,
+  initialColor,
   onSubmit,
   onClose,
   subtitle = '科目や資格ごとに問題をまとめます',
@@ -38,11 +115,19 @@ function FolderForm({
   const colors = useTheme();
   const editing = initialName !== undefined;
   const [name, setName] = useState(initialName ?? '');
+  const repos = useRepositories();
+  // Create mode preselects the first palette color no live folder uses yet.
+  const [color, setColor] = useState<FolderColorValue>(() =>
+    editing
+      ? resolveFolderColorKey(initialColor, 0)
+      : ((initialColor as FolderColorValue | undefined) ??
+        nextFolderColorKey(repos.folders.list().map((f) => f.color))),
+  );
   const [error, setError] = useState<string | null>(null);
 
   const submit = () => {
     try {
-      onSubmit(name);
+      onSubmit(name, color);
       onClose();
     } catch (e) {
       if (e instanceof ValidationError) setError(e.message);
@@ -81,6 +166,7 @@ function FolderForm({
           </Text>
         </View>
       </View>
+      <FolderPreview name={name} color={color} />
       <View style={{ gap: 6 }}>
         <TextField
           label="フォルダー名"
@@ -103,6 +189,7 @@ function FolderForm({
           </Text>
         )}
       </View>
+      <FolderColorPicker value={color} onChange={setColor} />
       <View style={{ flexDirection: 'row', gap: 12 }}>
         <Button label="キャンセル" variant="secondary" onPress={onClose} flex />
         <Button label={editing ? '保存' : submitLabel} onPress={submit} disabled={isBlank(name)} flex />

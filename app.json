@@ -29,7 +29,7 @@
       "expo-router",
       "expo-font",
       "expo-sqlite",
-      "expo-notifications",
+      ["expo-notifications", { "sounds": ["./assets/sounds/timer-alarm.wav", "./assets/sounds/timer-alarm-short.wav"] }],
       [
         "expo-image-picker",
         {

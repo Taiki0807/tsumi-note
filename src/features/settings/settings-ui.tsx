@@ -12,6 +12,8 @@ export function SettingsScaffold({
   children,
   closeIcon = false,
   gap = 14,
+  headerRight,
+  overlay,
 }: {
   title: string;
   children: ReactNode;
@@ -19,6 +21,10 @@ export function SettingsScaffold({
   closeIcon?: boolean;
   /** Vertical gap between the sections of the body (Figma: 14 for settings, 16–20 for records). */
   gap?: number;
+  /** An action at the right end of the app bar (e.g. 共有). */
+  headerRight?: ReactNode;
+  /** Rendered after the body, outside the scroll view (e.g. an off-screen view that is captured as an image). */
+  overlay?: ReactNode;
 }) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
@@ -52,6 +58,7 @@ export function SettingsScaffold({
         >
           {title}
         </Text>
+        {headerRight}
       </View>
       <ScrollView
         contentContainerStyle={{
@@ -66,6 +73,7 @@ export function SettingsScaffold({
       >
         {children}
       </ScrollView>
+      {overlay}
     </View>
   );
 }

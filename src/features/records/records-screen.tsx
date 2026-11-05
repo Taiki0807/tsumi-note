@@ -1,11 +1,13 @@
 import { router } from 'expo-router';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useMemo, useRef } from 'react';
+import { Pressable, ScrollView, Text, View, type HostInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
 import { Icon } from '@/components/icons';
 import { fontFamily, layout, radius, shadow, typography, useTheme } from '@/design';
 
+import { captureShareImage } from './capture-share-image';
 import { useFolderColors } from './folder-colors';
 import {
   chartMaxHours,
@@ -19,6 +21,10 @@ import {
   WEEKDAY_LABELS,
   type DayRecord,
 } from './records-logic';
+import { ShareButton } from './share-button';
+import { ShareImageView } from './share-image-view';
+import { buildShareModel } from './share-model';
+import { buildWeekShareText } from './share-text';
 import { useWeeklyRecord } from './use-weekly-record';
 
 /** Figma 02 学習記録 › Weekly chart: 150pt frame, baseline 120pt below the top gridline. */
@@ -247,6 +253,21 @@ export function RecordsScreen() {
       .map((f) => ({ folderId: f.id as string | null, name: f.name })),
     ...(usedFolderIds.has(null) ? [{ folderId: null, name: '未分類' }] : []),
   ];
+  const shareRef = useRef<HostInstance>(null);
+  const shareModel = useMemo(
+    () => (view ? buildShareModel({ record: view.record, folders: view.folders, folderId }) : null),
+    [view, folderId],
+  );
+  const shareMessage = useMemo(
+    () =>
+      shareModel
+        ? buildWeekShareText(shareModel, {
+            isCurrentWeek,
+            folderName: folderId === undefined ? undefined : shareModel.scopeLabel,
+          })
+        : undefined,
+    [shareModel, isCurrentWeek, folderId],
+  );
   const selectedFolderName = folders.find((f) => f.id === folderId)?.name ?? 'すべて';
 
   const numeric = {
@@ -291,6 +312,13 @@ export function RecordsScreen() {
         >
           学習記録
         </Text>
+        {/* 共有: 表示中の週をiOS標準の共有シートで画像共有する (Figma未定義)。 */}
+        <ShareButton
+          accessibilityLabel="グラフを画像で共有"
+          disabled={!shareModel}
+          capture={() => captureShareImage(shareRef)}
+          message={shareMessage}
+        />
         {/* Figma 02 › IconButton/記録を追加: 44pt primary-soft circle with a 22pt plus → 記録を追加 (02c). */}
         <Pressable
           accessibilityRole="button"
@@ -428,6 +456,20 @@ export function RecordsScreen() {
                 </View>
               ))}
             </View>
+          )}
+
+          {/* Figma 192:166 › tap hint: 11pt Bold, primary. Only when there are bars to tap. */}
+          {record && record.totalSeconds > 0 && (
+            <Text
+              style={{
+                fontFamily: fontFamily.bold,
+                fontSize: 11,
+                lineHeight: 16,
+                color: colors.primary,
+              }}
+            >
+              棒をタップすると、その日の記録が見られます
+            </Text>
           )}
 
           {record && record.totalSeconds === 0 && (
@@ -597,6 +639,7 @@ export function RecordsScreen() {
           </View>
         )}
       </ScrollView>
+      {shareModel && <ShareImageView ref={shareRef} model={shareModel} colorFor={colorFor} />}
     </View>
   );
 }

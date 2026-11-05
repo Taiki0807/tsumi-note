@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
 import { useRepositories } from '@/db/database-provider';
-import { parseTimerAlerts } from '@/domain/app-settings';
+import { withAlarmMode, type TimerAlarmMode } from '@/domain/app-settings';
+import { loadTimerAlerts, saveTimerAlerts } from '@/features/settings/settings-use-cases';
 
 import {
   advance,
@@ -50,6 +51,7 @@ export function useTimer() {
   /** Bumped whenever finished focus sessions were saved, so stats derived from SQLite reload. */
   const [savedCount, setSavedCount] = useState(0);
   const stateRef = useRef(state);
+  const [alerts, setAlerts] = useState(() => loadTimerAlerts(repos));
 
   /** Applies a new state: persists it, keeps notifications in sync and saves finished focuses. */
   const commit = useCallback(
@@ -85,7 +87,7 @@ export function useTimer() {
   // The interval only repaints; correctness comes from `targetEndAt - Date.now()`.
   useEffect(() => {
     if (state.status !== 'running') return;
-    const id = setInterval(sync, 250);
+    const id = setInterval(() => sync(), 250);
     return () => clearInterval(id);
   }, [state.status, sync]);
 
@@ -125,8 +127,8 @@ export function useTimer() {
 
   /** Creates a folder from the timer and selects it for the next run. Throws ValidationError on a bad name. */
   const createFolder = useCallback(
-    (name: string) => {
-      const folder = repos.folders.create({ name });
+    (name: string, color?: string) => {
+      const folder = repos.folders.create({ name, color });
       setFolders(storage.listFolders());
       selectFolder(folder.id);
     },
@@ -165,9 +167,22 @@ export function useTimer() {
   // notifications already queued for a running timer carry the new sound choice.
   useFocusEffect(
     useCallback(() => {
-      configureTimerAlerts(parseTimerAlerts((key) => repos.settings.get(key)));
+      const stored = loadTimerAlerts(repos);
+      configureTimerAlerts(stored);
+      setAlerts(stored);
       void syncTimerNotifications(stateRef.current, Date.now());
     }, [repos]),
+  );
+
+  /** タイマー画面のスピーカーから: persists the アラーム mode (vibration untouched) and re-queues notifications. */
+  const setAlarmMode = useCallback(
+    (mode: TimerAlarmMode) => {
+      const next = saveTimerAlerts(repos, withAlarmMode(alerts, mode));
+      configureTimerAlerts(next);
+      setAlerts(next);
+      void syncTimerNotifications(stateRef.current, Date.now());
+    },
+    [alerts, repos],
   );
 
   // The settings sheet on マイページ writes the same storage; pick its changes up when this tab regains focus.
@@ -184,6 +199,8 @@ export function useTimer() {
     savedCount,
     folders,
     selectedFolderId,
+    alarmMode: alerts.alarmMode,
+    setAlarmMode,
     selectFolder,
     createFolder,
     remainingMs: getRemainingMs(state, now),
